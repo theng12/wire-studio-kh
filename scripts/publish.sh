@@ -29,6 +29,7 @@ K=~/Library/KHUpdater
   --artifact ~/$REMOTE_DIR/'Wire Studio KH_${VERSION}_aarch64.dmg' \
   --changelog ~/$REMOTE_DIR/CHANGELOG.md \
   --name 'Wire Studio KH' \
+  --tagline 'Posts one caption and image to your social accounts.' \
   --kind app-dmg \
   --hold-url 'http://127.0.0.1:8649/api/maintenance/hold'
 "
