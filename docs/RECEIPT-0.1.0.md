@@ -1,10 +1,23 @@
 # Wire Studio KH 0.1.0 — build receipt (2026-11-21)
 
-**State: built, tested and packaged; not published.** The signed DMG exists and
-passes every check; the feed entry is **not** written — publishing to the public
-signed feed needs the owner's explicit go-ahead (the permission layer refused a
-peer session's instruction for a new public surface, correctly). Commit `1bff642`
-+ packaging changes on `main` of `~/Developer/My Own Apps/wire-studio-kh`.
+**State: published 0.1.0.** The signed DMG is on the signed feed and the served
+entry was read back from 1301 with a matching sha256. Published
+2026-11-21T09:54:12Z after the owner said "Publish it" in the assistant session.
+Commit on `main` of `~/Developer/My Own Apps/wire-studio-kh` recorded below.
+
+## Served feed entry (read back from 1301, verified)
+
+| Field | Value |
+|---|---|
+| app / version | `wire` / 0.1.0 |
+| kind | app-dmg |
+| sha256 | `04ffe200c77ad0e5051dfe5596693289ff55519cd7c551e58066efd2899dada5` |
+| bytes | 4,436,182 |
+| bundleID | `com.terranash.wirestudiokh` |
+| holdURL | `http://127.0.0.1:8649/api/maintenance/hold` |
+| holdSince | 0.1.0 |
+| icon | `6d9a315092ed-icon.png` (sha256 recorded) |
+| notes | from `CHANGELOG.md` 0.1.0 |
 
 ## Artifact
 

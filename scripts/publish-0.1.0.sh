@@ -29,9 +29,9 @@ K=~/Library/KHUpdater
   --artifact ~/$REMOTE_DIR/'Wire Studio KH_${VERSION}_aarch64.dmg' \
   --changelog ~/$REMOTE_DIR/CHANGELOG.md \
   --name 'Wire Studio KH' \
-  --kind app \
+  --kind app-dmg \
   --hold-url 'http://127.0.0.1:8649/api/maintenance/hold' \
-  --new-app
+  --allow-same
 "
 
 echo "--- feed readback from 1301 ---"
