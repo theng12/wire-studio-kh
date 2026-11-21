@@ -68,8 +68,10 @@ ln -sfn "$data" "$tmp/wire-studio-kh-test-$pid"
 : > "$tmp/go"
 
 ready=0
+# The app prints URL, token and data dir as three separate lines; the last one
+# is the "all three are on disk" signal.
 for tries in $(seq 1 100); do
-  if grep -q '^TEST_URL=' "$log" 2>/dev/null; then ready=1; break; fi
+  if grep -q '^TEST_DATA_DIR=' "$log" 2>/dev/null; then ready=1; break; fi
   kill -0 "$pid" 2>/dev/null || break
   sleep 0.1
 done

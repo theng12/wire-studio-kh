@@ -19,7 +19,7 @@
   const SECTIONS = {
     composer: { eyebrow: 'Compose', title: 'Composer', subtitle: 'Write a text post, choose where it goes, and send it now or later.' },
     queue: { eyebrow: 'Dispatch', title: 'Queue', subtitle: 'One row per target. Retry or cancel a delivery and see the reason.' },
-    targets: { eyebrow: 'Connections', title: 'Targets', subtitle: 'Connect a Telegram bot and choose the channel it posts to.' },
+    targets: { eyebrow: 'Connections', title: 'Targets', subtitle: 'Telegram, YouTube and Facebook Page — state comes from the core.' },
     import: { eyebrow: 'Still Posts', title: 'Import Still Posts', subtitle: 'Copies posts and images from a Story Studio KH channel into Wire. Story is never changed.' },
     settings: { eyebrow: 'Preferences', title: 'Settings', subtitle: 'App paths, connections, updates, appearance and about.' }
   };
@@ -43,6 +43,7 @@
   let queueLayout = 'table';
   let dialogSeq = 0;
   const dialogStack = [];
+  const presetSelections = {};
   let importPreview = null;
   let importBusy = null;
 
@@ -52,7 +53,7 @@
 
   function emptyState() {
     return {
-      dataDir: '', targets: [], deliveries: [],
+      dataDir: '', targets: [], deliveries: [], presets: [],
       telegram: { configured: false, connection: 'not_configured', chatId: '', last4: '', reason: '' }
     };
   }
@@ -242,6 +243,7 @@
     return {
       id: String(target.id || target.name || index + 1),
       label: String(target.label || target.name || target.channel_title || target.chat_id || platform || 'Target ' + (index + 1)),
+      platform,
       connection: normalizeConnection(target.connection_state || target.connectionState || target.state),
       reason: String(target.reason || target.error || target.last_error || ''),
       enabled: target.enabled !== false
@@ -258,10 +260,22 @@
     const deliveriesRaw = Array.isArray(source.deliveries) ? source.deliveries
       : Array.isArray(source.queue) ? source.queue
       : Array.isArray(source.rows) ? source.rows : [];
+    // presets only from the core; a missing list means "No presets reported", never invented.
+    const presets = Array.isArray(source.presets) ? source.presets
+      .filter(item => item && typeof item === 'object')
+      .map(item => ({
+        id: String(pickField(item, 'id', 'preset_id', 'presetId') || ''),
+        platform: String(pickField(item, 'platform') || '').toLowerCase(),
+        label: String(pickField(item, 'label') || ''),
+        ratio: String(pickField(item, 'ratio') || ''),
+        maxTextLength: countOf(pickField(item, 'max_text_length', 'maxTextLength', 'max_length'))
+      }))
+      .filter(preset => preset.id && preset.platform) : [];
     return {
       dataDir: String(source.data_dir || source.dataDir || ''),
       appearance: String(source.appearance || ''),
       targets: targetsRaw.map(normalizeTarget),
+      presets,
       telegram: {
         configured,
         connection: normalizeConnection(telegramRaw.connection_state || telegramRaw.connectionState || telegramRaw.state),
@@ -309,6 +323,7 @@
     return {
       id: String(row.id || index + 1), text,
       target: String(row.target || row.target_label || row.target_name || row.channel || 'Target not reported'),
+      preset: String(row.preset || row.preset_id || row.presetId || ''),
       shown, nextAt, error, attempts
     };
   }
@@ -365,6 +380,7 @@
 
   function render() {
     renderTargetChecks();
+    renderPresetPickers();
     renderQueue();
     renderTargets();
     renderSettings();
@@ -390,6 +406,74 @@
         el('span', { class: 'chip', 'data-level': target.connection === 'ready' ? 'ok' : target.connection === 'failed' ? 'bad' : 'off', text: target.connection.replace('_', ' ') })
       ));
     });
+  }
+
+  function presetsFor(platform) {
+    return state.presets.filter(preset => preset.platform === String(platform || '').toLowerCase());
+  }
+
+  function presetHelp(preset) {
+    if (!preset) return 'No presets reported by the core.';
+    const parts = [];
+    if (preset.ratio) parts.push('Ratio ' + preset.ratio);
+    if (preset.maxTextLength) parts.push('Max ' + Number(preset.maxTextLength).toLocaleString() + ' characters');
+    return parts.length ? parts.join(' · ') : 'No format details reported by the core.';
+  }
+
+  function renderPresetPickers() {
+    const field = $('#presetField');
+    const host = $('#presetPickers');
+    host.replaceChildren();
+    const selected = $$('input[name="target"]:checked')
+      .map(input => state.targets.find(target => target.id === input.value))
+      .filter(Boolean);
+    field.hidden = selected.length === 0;
+    if (!selected.length) return;
+    selected.forEach((target, index) => {
+      const list = presetsFor(target.platform);
+      const selectId = 'preset-' + index;
+      const select = el('select', {
+        id: selectId, 'aria-label': 'Preset for ' + target.label,
+        disabled: !connected || !list.length
+      });
+      if (!list.length) select.append(el('option', { value: '', text: 'No presets reported' }));
+      else list.forEach(preset => select.append(el('option', { value: preset.id, text: preset.label || preset.id })));
+      const saved = presetSelections[target.id];
+      select.value = list.some(preset => preset.id === saved) ? saved : (list[0] ? list[0].id : '');
+      presetSelections[target.id] = select.value;
+      const help = el('p', { class: 'help', text: presetHelp(list.find(preset => preset.id === select.value)) });
+      select.addEventListener('change', () => {
+        presetSelections[target.id] = select.value;
+        help.textContent = presetHelp(list.find(preset => preset.id === select.value));
+      });
+      host.append(el('div', { class: 'field preset-row' },
+        el('label', { for: selectId, text: target.label }), select, help));
+    });
+  }
+
+  function selectedPresets(targets) {
+    const map = {};
+    targets.forEach(id => {
+      const target = state.targets.find(item => item.id === id);
+      if (!target) return;
+      const list = presetsFor(target.platform);
+      if (!list.length) return;
+      const saved = presetSelections[id];
+      map[id] = list.some(preset => preset.id === saved) ? saved : list[0].id;
+    });
+    return map;
+  }
+
+  function presetLabel(id) {
+    if (!id) return '';
+    const preset = state.presets.find(item => item.id === id);
+    return preset && preset.label ? preset.label : id;
+  }
+
+  function showToast(text) {
+    const node = el('div', { class: 'toast', text });
+    $('#toasts').append(node);
+    setTimeout(() => node.remove(), 6000);
   }
 
   function stateBlock(kind, title, detail, actionLabel, onAction) {
@@ -463,9 +547,11 @@
     rows.forEach(row => {
       const postCell = el('td', {}, el('div', { class: 'row-title', text: excerpt(row.text) }));
       if (row.error) postCell.append(el('div', { class: 'cell-note', text: row.error }));
+      const targetCell = el('td', {}, el('span', { text: row.target }));
+      if (row.preset) targetCell.append(el('div', { class: 'cell-note', text: presetLabel(row.preset) }));
       body.append(el('tr', {},
         postCell,
-        el('td', { text: row.target }),
+        targetCell,
         el('td', {}, stateChip(row), el('div', { class: 'cell-note', text: 'attempt ' + (row.attempts || 0) })),
         el('td', { class: 'mono', text: row.shown === 'sent' || row.shown === 'cancelled' ? '—' : formatWhen(row.nextAt) }),
         el('td', {}, actionButtons(row))
@@ -482,8 +568,10 @@
   function renderCards(rows) {
     const list = el('div', { class: 'card-list' });
     rows.forEach(row => {
+      const targetBox = el('div', {}, el('span', { text: 'Target' }), el('strong', { text: row.target }));
+      if (row.preset) targetBox.append(el('div', { class: 'cell-note', text: presetLabel(row.preset) }));
       const meta = el('div', { class: 'queue-meta' },
-        el('div', {}, el('span', { text: 'Target' }), el('strong', { text: row.target })),
+        targetBox,
         el('div', {}, el('span', { text: 'Next attempt (UTC+7)' }), el('strong', { class: 'mono', text: row.shown === 'sent' || row.shown === 'cancelled' ? '—' : formatWhen(row.nextAt) })),
         el('div', {}, el('span', { text: 'Attempts' }), el('strong', { text: String(row.attempts || 0) }))
       );
@@ -514,6 +602,22 @@
     const chatInput = $('#telegramChatId');
     if (document.activeElement !== chatInput) chatInput.value = telegram.chatId;
     $('#settingsTelegramHelp').textContent = 'Telegram is ' + telegram.connection.replace('_', ' ') + '. Manage the target here.';
+    renderPlatformCard('youtube', '#youtubeChip', '#youtubeReason');
+    renderPlatformCard('facebook', '#facebookChip', '#facebookReason');
+  }
+
+  function renderPlatformCard(platform, chipSelector, reasonSelector) {
+    const target = state.targets.find(item => item.platform === platform);
+    // never ready unless the core said so; a missing target is honestly not configured.
+    const connection = target ? target.connection : 'not_configured';
+    const chip = $(chipSelector);
+    chip.textContent = connection.replace('_', ' ');
+    chip.dataset.level = connection === 'ready' ? 'ok' : connection === 'failed' ? 'bad' : 'off';
+    $(reasonSelector).textContent = target && target.reason
+      ? target.reason
+      : connection === 'ready' ? 'Connection verified by the core.'
+        : connection === 'failed' ? 'Connection failed; no reason reported by the core.'
+          : 'No verified connection reported by the core yet.';
   }
 
   function renderSettings() {
@@ -897,6 +1001,13 @@
     return { delayS: Math.round(deltaMs / 1000) };
   }
 
+  function presetsRejected(err) {
+    const msg = message(err);
+    if (!/\bpresets\b/i.test(msg)) return false;
+    return /(unknown|unexpected|unrecognized|unsupported|invalid|extra|not expected|not allowed|not permitted)\s+(field|argument|parameter|key|property|attribute)\b/i.test(msg)
+      || /\bpresets\b[^.;]{0,80}(was|were)?\s*(unexpected|unknown|not allowed|not expected|not valid|not a valid)/i.test(msg);
+  }
+
   async function queuePost() {
     clearComposerError();
     if (!connected) return showComposerError('Core is offline — nothing is queued.');
@@ -910,8 +1021,16 @@
     const button = $('#queueBtn');
     button.disabled = true;
     button.textContent = 'Queueing…';
+    const presets = selectedPresets(targets);
     try {
-      await callCore('queue_post', { text, targets, delayS: schedule.delayS });
+      try {
+        await callCore('queue_post', { text, targets, delayS: schedule.delayS, presets });
+      } catch (err) {
+        // core predates the presets field: fall back to plain queue_post, and say so.
+        if (!presetsRejected(err)) throw err;
+        await callCore('queue_post', { text, targets, delayS: schedule.delayS });
+        showToast('The core rejected presets; queued without them.');
+      }
       $('#postText').value = '';
       setStatus('Queued to ' + targets.length + ' target' + (targets.length === 1 ? '' : 's'), 'ok');
       await refreshState();
@@ -1019,6 +1138,9 @@
     $('#offlineRetry').addEventListener('click', refreshState);
     $('#queueBtn').addEventListener('click', queuePost);
     $('#postText').addEventListener('input', () => { updateCount(); clearComposerError(); });
+    $('#targetChecks').addEventListener('change', event => {
+      if (event.target && event.target.name === 'target') { renderPresetPickers(); clearComposerError(); }
+    });
     $$('input[name="schedule"]').forEach(radio => radio.addEventListener('change', () => {
       $('#schedulePick').disabled = $('input[name="schedule"]:checked').value !== 'pick';
       clearComposerError();

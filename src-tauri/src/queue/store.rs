@@ -7,12 +7,13 @@ use chrono::{DateTime, Duration, SecondsFormat, Utc};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use uuid::Uuid;
 
+use crate::formats;
 use super::models::{Claim, DeliveryRow, Failure, ATTENTION, CANCELLED, FAILED, PENDING, SENDING, SENT};
 use super::scheduler::{backoff_delay, MAX_ATTEMPTS};
 #[cfg(test)]
 use super::scheduler::backoff_base_secs;
 
-const SCHEMA_VERSION: i64 = 1;
+const SCHEMA_VERSION: i64 = 2;
 
 const SCHEMA_V1: &str = "
 CREATE TABLE posts (
@@ -40,6 +41,44 @@ CREATE TABLE deliveries (
     created_at        TEXT NOT NULL,
     UNIQUE(post_id, target)
 );
+CREATE INDEX idx_deliveries_due ON deliveries(state, next_attempt_at);
+";
+
+// v2: fan-out is one row per (target, preset), so uniqueness grows a preset
+// column. Existing rows copy over with a NULL preset.
+const SCHEMA_V2_DELIVERIES: &str = "
+ALTER TABLE deliveries RENAME TO deliveries_v1;
+CREATE TABLE deliveries (
+    id                TEXT PRIMARY KEY,
+    post_id           TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+    target            TEXT NOT NULL,
+    state             TEXT NOT NULL DEFAULT 'pending',
+    attempts          INTEGER NOT NULL DEFAULT 0,
+    next_attempt_at   TEXT NOT NULL,
+    scheduled_at      TEXT NOT NULL,
+    claimed_at        TEXT,
+    last_error        TEXT,
+    attention         INTEGER NOT NULL DEFAULT 0,
+    remote_id         TEXT,
+    remote_url        TEXT,
+    sent_at           TEXT,
+    sent_late_minutes INTEGER,
+    retried_by        TEXT,
+    retried_at        TEXT,
+    created_at        TEXT NOT NULL,
+    preset            TEXT,
+    UNIQUE(post_id, target, preset)
+);
+INSERT INTO deliveries (
+    id, post_id, target, state, attempts, next_attempt_at, scheduled_at,
+    claimed_at, last_error, attention, remote_id, remote_url, sent_at,
+    sent_late_minutes, retried_by, retried_at, created_at, preset
+)
+SELECT id, post_id, target, state, attempts, next_attempt_at, scheduled_at,
+       claimed_at, last_error, attention, remote_id, remote_url, sent_at,
+       sent_late_minutes, retried_by, retried_at, created_at, NULL
+FROM deliveries_v1;
+DROP TABLE deliveries_v1;
 CREATE INDEX idx_deliveries_due ON deliveries(state, next_attempt_at);
 ";
 
@@ -72,6 +111,11 @@ fn bad_data(message: &str) -> rusqlite::Error {
             message.to_string(),
         )),
     )
+}
+
+/// "youtube:abc" → "youtube"; a bare target names its own platform.
+fn platform_of(target: &str) -> &str {
+    target.split_once(':').map_or(target, |(platform, _)| platform)
 }
 
 impl Store {
@@ -126,6 +170,13 @@ impl Store {
                 [],
             )?;
         }
+        if version < 2 {
+            tx.execute_batch(SCHEMA_V2_DELIVERIES)?;
+            tx.execute(
+                "UPDATE meta SET value = '2' WHERE key = 'schema_version'",
+                [],
+            )?;
+        }
         tx.commit()
     }
 
@@ -134,6 +185,42 @@ impl Store {
         text: &str,
         targets: &[String],
     ) -> rusqlite::Result<(String, Vec<String>)> {
+        // Default preset per platform, so plain callers keep working unchanged.
+        let choices: Vec<(String, Option<String>)> = targets
+            .iter()
+            .map(|target| {
+                let preset = formats::presets_for(platform_of(target))
+                    .first()
+                    .map(|p| p.id.to_string());
+                (target.clone(), preset)
+            })
+            .collect();
+        self.create_post_with_presets(text, &choices)
+    }
+
+    /// One authored variant fans out to one delivery row per (target, preset).
+    pub fn create_post_with_presets(
+        &mut self,
+        text: &str,
+        choices: &[(String, Option<String>)],
+    ) -> rusqlite::Result<(String, Vec<String>)> {
+        // Validate every pair first: a bad preset refuses the whole post,
+        // never a half-written row.
+        let mut resolved: Vec<(&str, Option<&str>)> = Vec::with_capacity(choices.len());
+        for (target, preset) in choices {
+            if let Some(id) = preset.as_deref() {
+                let known = formats::get(id)
+                    .ok_or_else(|| bad_data(&format!("unknown preset '{id}'")))?;
+                if known.platform != platform_of(target) {
+                    return Err(bad_data(&format!(
+                        "preset '{id}' is for {}, but target '{target}' is {}",
+                        known.platform,
+                        platform_of(target)
+                    )));
+                }
+            }
+            resolved.push((target.as_str(), preset.as_deref()));
+        }
         let now = iso(Utc::now());
         let post_id = Uuid::new_v4().to_string();
         let mut delivery_ids = Vec::new();
@@ -143,16 +230,16 @@ impl Store {
             "INSERT INTO posts (id, text, created_at) VALUES (?1, ?2, ?3)",
             params![post_id, text, now],
         )?;
-        for target in targets {
-            if !seen.insert(target) {
+        for (target, preset) in resolved {
+            if !seen.insert((target, preset)) {
                 continue;
             }
             let id = Uuid::new_v4().to_string();
             tx.execute(
                 "INSERT INTO deliveries (id, post_id, target, state, attempts, \
-                 next_attempt_at, scheduled_at, created_at) \
-                 VALUES (?1, ?2, ?3, 'pending', 0, ?4, ?4, ?4)",
-                params![id, post_id, target, now],
+                 next_attempt_at, scheduled_at, created_at, preset) \
+                 VALUES (?1, ?2, ?3, 'pending', 0, ?4, ?4, ?4, ?5)",
+                params![id, post_id, target, now, preset],
             )?;
             delivery_ids.push(id);
         }
@@ -164,18 +251,18 @@ impl Store {
     pub fn claim_due(&mut self, now: DateTime<Utc>) -> rusqlite::Result<Option<Claim>> {
         let now_s = iso(now);
         let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let due: Option<(String, String, String, String, i64)> = tx
+        let due: Option<(String, String, String, String, Option<String>, i64)> = tx
             .query_row(
-                "SELECT d.id, d.post_id, d.target, p.text, \
+                "SELECT d.id, d.post_id, d.target, p.text, d.preset, \
                  CAST(MAX(0, (julianday(?1) - julianday(d.scheduled_at)) * 1440) AS INTEGER) \
                  FROM deliveries d JOIN posts p ON p.id = d.post_id \
                  WHERE d.state = 'pending' AND d.next_attempt_at <= ?1 \
                  ORDER BY d.next_attempt_at, d.rowid LIMIT 1",
                 params![now_s],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
             )
             .optional()?;
-        let Some((id, post_id, target, text, late_minutes)) = due else {
+        let Some((id, post_id, target, text, preset, late_minutes)) = due else {
             return Ok(None);
         };
         tx.execute(
@@ -185,7 +272,7 @@ impl Store {
             params![now_s, late_minutes, id],
         )?;
         tx.commit()?;
-        Ok(Some(Claim { delivery_id: id, post_id, target, text }))
+        Ok(Some(Claim { delivery_id: id, post_id, target, text, preset }))
     }
 
     pub fn mark_sent(
@@ -304,12 +391,13 @@ impl Store {
 
     pub fn queue_view(&self) -> rusqlite::Result<Vec<DeliveryRow>> {
         let mut stmt = self.conn.prepare(
-            "SELECT d.id, d.post_id, p.text, d.target, d.state, d.attempts, d.next_attempt_at, \
-             d.last_error, d.attention, d.remote_id, d.remote_url, d.sent_late_minutes \
+            "SELECT d.id, d.post_id, p.text, d.target, d.preset, d.state, d.attempts, \
+             d.next_attempt_at, d.last_error, d.attention, d.remote_id, d.remote_url, \
+             d.sent_late_minutes \
              FROM deliveries d JOIN posts p ON p.id = d.post_id ORDER BY d.rowid DESC",
         )?;
         let rows = stmt.query_map([], |r| {
-            let state: String = r.get(4)?;
+            let state: String = r.get(5)?;
             let shown_state = match state.as_str() {
                 PENDING => "queued",
                 SENDING => "sending",
@@ -325,15 +413,16 @@ impl Store {
                 post_id: r.get(1)?,
                 text: r.get(2)?,
                 target: r.get(3)?,
+                preset: r.get(4)?,
                 state,
                 shown_state,
-                attempts: r.get(5)?,
-                next_attempt_at: r.get(6)?,
-                last_error: r.get(7)?,
-                attention: r.get::<_, i64>(8)? != 0,
-                remote_id: r.get(9)?,
-                remote_url: r.get(10)?,
-                sent_late_minutes: r.get(11)?,
+                attempts: r.get(6)?,
+                next_attempt_at: r.get(7)?,
+                last_error: r.get(8)?,
+                attention: r.get::<_, i64>(9)? != 0,
+                remote_id: r.get(10)?,
+                remote_url: r.get(11)?,
+                sent_late_minutes: r.get(12)?,
             })
         })?;
         rows.collect()
@@ -509,5 +598,184 @@ mod tests {
         assert!((29..=30).contains(&late), "lateness was {late}");
         store.mark_sent(&ids[0], None, None).unwrap();
         assert_eq!(row_for(&store, &ids[0]).sent_late_minutes, Some(late));
+    }
+
+    fn temp_db_path() -> std::path::PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!("wire-studio-store-v1-{}.sqlite", Uuid::new_v4()));
+        path
+    }
+
+    #[test]
+    fn migration_from_v1_keeps_rows_and_adds_null_preset() {
+        let path = temp_db_path();
+        {
+            let db = Connection::open(&path).unwrap();
+            db.execute_batch(SCHEMA_V1).unwrap();
+            // The 0.1.0/0.2.0 app created meta itself; a v1 database always has it.
+            db.execute_batch("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);").unwrap();
+            db.execute(
+                "INSERT INTO meta (key, value) VALUES ('schema_version', '1')",
+                [],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO posts (id, text, created_at) VALUES ('p1', 'old text', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+            db.execute(
+                "INSERT INTO deliveries (id, post_id, target, state, attempts, \
+                 next_attempt_at, scheduled_at, created_at) \
+                 VALUES ('d1', 'p1', 'chat', 'pending', 0, '2026-01-01T00:00:00Z', \
+                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                [],
+            )
+            .unwrap();
+        }
+        {
+            let store = Store::open(&path).unwrap();
+            let version: String = store
+                .conn
+                .query_row(
+                    "SELECT value FROM meta WHERE key = 'schema_version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(version, "2");
+            let preset: Option<String> = store
+                .conn
+                .query_row("SELECT preset FROM deliveries WHERE id = 'd1'", [], |r| {
+                    r.get(0)
+                })
+                .unwrap();
+            assert_eq!(preset, None, "v1 rows keep a NULL preset");
+            let rows = store.queue_view().unwrap();
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].text, "old text");
+            assert_eq!(rows[0].preset, None);
+        }
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(format!("{}-wal", path.display()));
+        let _ = std::fs::remove_file(format!("{}-shm", path.display()));
+    }
+
+    #[test]
+    fn fan_out_stores_each_chosen_preset_exactly() {
+        let mut store = fresh();
+        let choices = vec![
+            ("youtube:chan".to_string(), Some("yt-16x9".to_string())),
+            ("youtube:chan".to_string(), Some("yt-shorts".to_string())),
+            ("facebook_page:1".to_string(), Some("fb-4x5".to_string())),
+            ("telegram:chat".to_string(), None),
+        ];
+        let (_, ids) = store.create_post_with_presets("same text", &choices).unwrap();
+        assert_eq!(ids.len(), 4, "one row per (target, preset)");
+        let mut stored: Vec<(String, Option<String>)> = ids
+            .iter()
+            .map(|id| {
+                let row = row_for(&store, id);
+                (row.target, row.preset)
+            })
+            .collect();
+        stored.sort();
+        assert_eq!(
+            stored,
+            vec![
+                ("facebook_page:1".to_string(), Some("fb-4x5".to_string())),
+                ("telegram:chat".to_string(), None),
+                ("youtube:chan".to_string(), Some("yt-16x9".to_string())),
+                ("youtube:chan".to_string(), Some("yt-shorts".to_string())),
+            ],
+            "the explicit override is stored as given, never replaced"
+        );
+    }
+
+    #[test]
+    fn mismatched_preset_is_refused_and_writes_nothing() {
+        let mut store = fresh();
+        let err = store
+            .create_post_with_presets(
+                "hello",
+                &[
+                    ("youtube:chan".to_string(), Some("yt-16x9".to_string())),
+                    ("youtube:chan".to_string(), Some("fb-1x1".to_string())),
+                ],
+            )
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("fb-1x1"), "reason names the preset: {msg}");
+        assert!(msg.contains("facebook_page"), "reason names its platform: {msg}");
+        assert!(msg.contains("youtube:chan"), "reason names the target: {msg}");
+        let posts: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM posts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(posts, 0, "validation runs before any write");
+        let deliveries: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM deliveries", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(deliveries, 0);
+    }
+
+    #[test]
+    fn unknown_preset_is_refused_and_writes_nothing() {
+        let mut store = fresh();
+        let err = store
+            .create_post_with_presets(
+                "hello",
+                &[("youtube:chan".to_string(), Some("nope".to_string()))],
+            )
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("unknown preset"), "reason names the problem: {msg}");
+        assert!(msg.contains("nope"), "reason names the id: {msg}");
+        let posts: i64 = store
+            .conn
+            .query_row("SELECT COUNT(*) FROM posts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(posts, 0);
+    }
+
+    #[test]
+    fn create_post_wrapper_picks_the_platform_default_preset() {
+        let mut store = fresh();
+        let (_, ids) = store
+            .create_post(
+                "hello",
+                &[
+                    "youtube:chan".to_string(),
+                    "telegram:chat".to_string(),
+                    "chat".to_string(),
+                ],
+            )
+            .unwrap();
+        let presets: Vec<Option<String>> =
+            ids.iter().map(|id| row_for(&store, id).preset.clone()).collect();
+        assert_eq!(presets[0], Some("yt-16x9".to_string()));
+        assert_eq!(presets[1], Some("tg-text".to_string()));
+        assert_eq!(presets[2], None, "a platform without presets stores NULL");
+    }
+
+    #[test]
+    fn claim_returns_the_preset_and_works_without_one() {
+        let mut store = fresh();
+        let (_, ids) = store
+            .create_post_with_presets(
+                "hello",
+                &[
+                    ("youtube:chan".to_string(), Some("yt-shorts".to_string())),
+                    ("chat".to_string(), None),
+                ],
+            )
+            .unwrap();
+        let first = store.claim_due(Utc::now()).unwrap().expect("first row due");
+        assert_eq!(first.delivery_id, ids[0]);
+        assert_eq!(first.preset.as_deref(), Some("yt-shorts"));
+        let second = store.claim_due(Utc::now()).unwrap().expect("second row due");
+        assert_eq!(second.preset, None, "preset-less rows still claim");
+        assert!(store.claim_due(Utc::now()).unwrap().is_none());
     }
 }

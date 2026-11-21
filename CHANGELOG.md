@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0 — 2026-11-21
+
+- Two more places to post: a YouTube channel (the video uploads straight to the channel and picks up where it stopped if the connection drops) and a Facebook Page (a text post, or one image that lives at a public web address).
+- Format presets: each place now has named sizes to choose from — YouTube landscape and Shorts, Facebook square, portrait and link card, Telegram text — and the composer shows the size, ratio, text limit and safe area before anything is sent.
+- One post, many places and many sizes: every place-plus-size pair is its own line in the queue, so you can see each one separately and a double post is still impossible.
+- Instagram is designed and shelved: nothing is built and it never appears in the app.
+- Refusals stay honest: a Facebook size on a YouTube channel is refused by name, Facebook says plainly when an image has no public web address, and sign-in or permission problems go to Needs attention instead of retrying forever.
+- The adapter tests now cover success, throttling, cut text, permanent refusal and sign-in expiry for every platform, so retry behaviour is proven before a real account is connected.
+
 ## 0.2.1 — 2026-11-21
 
 - Build hardening: the app no longer carries this Mac's home folder or build paths inside it. Release builds now rewrite compile-time paths to `/build` and strip symbols, so a downloaded copy reveals nothing about the machine that built it.

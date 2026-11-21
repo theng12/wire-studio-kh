@@ -75,6 +75,10 @@
             <div class="check-list" id="targetChecks"></div>
             <p class="help">Every chosen target gets its own queue row, so nothing is posted twice.</p>
           </fieldset>
+          <fieldset class="field" id="presetField" hidden>
+            <legend>Presets</legend>
+            <div class="preset-list" id="presetPickers"></div>
+          </fieldset>
           <fieldset class="field">
             <legend>When</legend>
             <div class="radio-list">
@@ -126,6 +130,24 @@
             </div>
           </div>
           <div class="actions"><button class="button" id="telegramManageBtn" type="button">Add token</button><button class="button subtle" id="telegramSaveChatBtn" type="button">Save channel</button></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>YouTube</h2><span class="chip" id="youtubeChip">not configured</span></div>
+          <p class="reason" id="youtubeReason">No connection state reported by the core yet.</p>
+          <p class="help">Google Cloud OAuth client, then connect the channel</p>
+          <div class="actions">
+            <span title="arrives when the YouTube connection ships"><button class="button" id="youtubeConnectBtn" type="button" title="arrives when the YouTube connection ships" disabled>Connect</button></span>
+            <span class="hint">Connection shipping in a later build.</span>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Facebook Page</h2><span class="chip" id="facebookChip">not configured</span></div>
+          <p class="reason" id="facebookReason">No connection state reported by the core yet.</p>
+          <p class="help">Meta app with pages_manage_posts</p>
+          <div class="actions">
+            <span title="arrives when the Facebook connection ships"><button class="button" id="facebookConnectBtn" type="button" title="arrives when the Facebook connection ships" disabled>Connect</button></span>
+            <span class="hint">Connection shipping in a later build.</span>
+          </div>
         </div>
       </section>
 
@@ -196,6 +218,7 @@
   </div>
 
   <div class="dialog-layer" id="dialogs"></div>
+  <div class="toast-layer" id="toasts" aria-live="polite" aria-atomic="false"></div>
   <script src="app.js"></script>
 </body>
 </html>

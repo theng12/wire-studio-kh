@@ -1,6 +1,7 @@
 //! Delivery adapter contract shared by every platform.
 
 pub mod facebook;
+pub mod stub;
 pub mod telegram;
 pub mod youtube;
 

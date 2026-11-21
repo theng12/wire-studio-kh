@@ -4,6 +4,7 @@ pub mod adapters;
 pub mod commands;
 pub mod dispatch;
 pub mod feedcheck;
+pub mod formats;
 pub mod gateway;
 pub mod hold;
 pub mod import;

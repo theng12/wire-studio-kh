@@ -177,9 +177,33 @@ fn schedule(state: &Shared, payload: Value) -> (u16, Value) {
     }
     // create_post owns dedupe and due time; delay_s is a test-side request only.
     let delay = delay_s(&payload);
+    // Optional { "<target>": "<preset id>" } map — the agent equivalent of the
+    // composer's preset picker, same validation as the UI path.
+    let presets = payload.get("presets").and_then(Value::as_object).cloned().unwrap_or_default();
+    // No entry means the platform's default preset, exactly what the composer pre-selects.
+    let choices: Vec<(String, Option<String>)> = targets
+        .iter()
+        .map(|t| {
+            let platform = t.split_once(':').map_or(t.as_str(), |(p, _)| p);
+            let preset = presets
+                .get(t)
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .or_else(|| {
+                    crate::formats::presets_for(platform)
+                        .first()
+                        .map(|p| p.id.to_string())
+                });
+            (t.clone(), preset)
+        })
+        .collect();
     let created = {
         let mut store = guard(&state.store);
-        let created = result_value(store.create_post(text, &targets).map_err(|error| error.to_string()));
+        let created = result_value(
+            store
+                .create_post_with_presets(text, &choices)
+                .map_err(|error| error.to_string()),
+        );
         if let Ok(value) = &created {
             let (post_id, _) = created_ids(value.clone());
             if delay > 0 {

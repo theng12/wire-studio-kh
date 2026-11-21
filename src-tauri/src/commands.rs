@@ -29,6 +29,19 @@ pub fn state(s: State<'_, Shared>) -> Result<serde_json::Value, String> {
         }
     }
 
+    let presets: Vec<serde_json::Value> = crate::formats::registry()
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "id": p.id,
+                "platform": p.platform,
+                "label": p.label,
+                "ratio": p.ratio,
+                "max_text_length": p.max_text_length,
+            })
+        })
+        .collect();
+
     Ok(serde_json::json!({
         "version": env!("CARGO_PKG_VERSION"),
         "paused": s.paused.load(Ordering::Relaxed),
@@ -36,6 +49,7 @@ pub fn state(s: State<'_, Shared>) -> Result<serde_json::Value, String> {
         "deliveries": rows,
         "next_due": next.map(|d| d.to_rfc3339()),
         "targets": all_targets,
+        "presets": presets,
         "telegram": {
             "configured": !sec.telegram.bot_token.is_empty() && !cfg.telegram_chat.is_empty(),
             "token_masked": if sec.telegram.bot_token.is_empty() { String::new() } else { secrets::mask(&sec.telegram.bot_token) },
@@ -52,6 +66,7 @@ pub fn queue_post(
     text: String,
     targets: Vec<String>,
     delay_s: i64,
+    presets: Option<std::collections::HashMap<String, String>>,
 ) -> Result<serde_json::Value, String> {
     let text = text.trim().to_string();
     if text.is_empty() {
@@ -60,9 +75,13 @@ pub fn queue_post(
     if targets.is_empty() {
         return Err("Pick at least one channel.".into());
     }
+    let choices: Vec<(String, Option<String>)> = targets
+        .iter()
+        .map(|target| (target.clone(), presets.as_ref().and_then(|m| m.get(target)).cloned()))
+        .collect();
     let created = {
         let mut store = s.store.lock().map_err(|_| "queue busy".to_string())?;
-        let (post_id, ids) = store.create_post(&text, &targets).map_err(err)?;
+        let (post_id, ids) = store.create_post_with_presets(&text, &choices).map_err(err)?;
         if delay_s > 0 {
             let at = chrono::Utc::now() + chrono::Duration::seconds(delay_s);
             store.set_next_attempt_for_post(&post_id, at).map_err(err)?;

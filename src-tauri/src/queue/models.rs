@@ -38,6 +38,7 @@ pub struct Claim {
     pub post_id: String,
     pub target: String,
     pub text: String,
+    pub preset: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,6 +48,7 @@ pub struct DeliveryRow {
     /// The post text, so the queue can show what is being sent without a second call.
     pub text: String,
     pub target: String,
+    pub preset: Option<String>,
     pub state: String,
     pub shown_state: String,
     pub attempts: i64,

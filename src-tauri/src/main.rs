@@ -27,8 +27,8 @@ fn main() {
             std::process::exit(0);
         }
         unsafe {
-            libc::signal(libc::SIGTERM, on_term as libc::sighandler_t);
-            libc::signal(libc::SIGINT, on_term as libc::sighandler_t);
+            libc::signal(libc::SIGTERM, on_term as *const () as libc::sighandler_t);
+            libc::signal(libc::SIGINT, on_term as *const () as libc::sighandler_t);
         }
 
         wire_studio_kh::start_hold(state.clone(), 8649);
