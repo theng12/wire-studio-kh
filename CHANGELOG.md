@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1 — 2026-11-21
+
+- Build hardening: the app no longer carries this Mac's home folder or build paths inside it. Release builds now rewrite compile-time paths to `/build` and strip symbols, so a downloaded copy reveals nothing about the machine that built it.
+
 ## 0.2.0 — 2026-11-21
 
 - New Import screen: point it at a Story Studio KH channel, see exactly what would come in, then copy the posts and images into Wire. Story's files are only ever read, never changed.
