@@ -44,6 +44,8 @@ pub struct Claim {
 pub struct DeliveryRow {
     pub id: String,
     pub post_id: String,
+    /// The post text, so the queue can show what is being sent without a second call.
+    pub text: String,
     pub target: String,
     pub state: String,
     pub shown_state: String,

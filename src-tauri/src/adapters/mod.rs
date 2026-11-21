@@ -1,5 +1,9 @@
 //! Delivery adapter contract shared by every platform.
 
+pub mod facebook;
+pub mod telegram;
+pub mod youtube;
+
 use std::future::Future;
 use std::pin::Pin;
 
@@ -158,6 +162,26 @@ pub trait PlatformAdapter: Send + Sync {
     fn capabilities(&self) -> Capabilities;
     fn connection_state(&self) -> BoxFuture<'_, Result<ConnectionState, AdapterError>>;
     fn publish(&self, payload: PublishPayload) -> BoxFuture<'_, Result<PublishOk, AdapterError>>;
+}
+
+/// 0.1.0 registry: Telegram is live; the two 0.3.0 skeletons report honestly.
+/// shortcut: Secrets has no YouTube/Facebook records yet, so those credentials
+/// are empty until the 0.3.0 secrets records are added.
+pub fn adapters(secrets: &crate::secrets::Secrets) -> Vec<Box<dyn PlatformAdapter>> {
+    vec![
+        Box::new(telegram::TelegramAdapter::new(
+            secrets.telegram.bot_token.clone(),
+        )),
+        Box::new(youtube::YouTubeAdapter::new(
+            String::new(),
+            String::new(),
+            String::new(),
+        )),
+        Box::new(facebook::FacebookPageAdapter::new(
+            String::new(),
+            String::new(),
+        )),
+    ]
 }
 
 #[cfg(test)]

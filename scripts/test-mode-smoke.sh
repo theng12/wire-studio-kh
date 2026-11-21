@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Headless entry smoke: printed URL/token, temp data dir, no window, clean SIGTERM.
+# Headless entry smoke: printed URL/token, temp data dir, guarded trigger, no window, clean SIGTERM.
 set -u
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -8,25 +8,64 @@ bin="${WIRE_BIN:-$root/src-tauri/target/debug/wire-studio-kh}"
 
 fails=0
 pass() { printf 'PASS %s\n' "$1"; }
-bad() { printf 'FAIL %s\n' "$1"; fails=$((fails + 1)); }
+bad() { printf 'FAIL %s (observed %s)\n' "$1" "$2"; fails=$((fails + 1)); }
+json_field() {
+  python3 -I -c '
+import json, sys
+try:
+    value = json.load(open(sys.argv[1]))
+    for key in sys.argv[2].split("."):
+        value = value[key]
+    if isinstance(value, bool): print(str(value).lower())
+    elif value is None: print("null")
+    elif isinstance(value, (list, dict)): print(json.dumps(value, separators=(",", ":")))
+    else: print(value)
+except Exception:
+    print("")
+' "$1" "$2"
+}
 
-if [ ! -x "$bin" ]; then
-  bad "binary missing: $bin (build first)"
-  exit 1
-fi
+if [ ! -x "$bin" ]; then bad "binary present" "no executable at $bin"; exit 1; fi
 pass "binary present"
 
 tmp="$(mktemp -d /tmp/wire-test-smoke.XXXXXX)"
+data="$tmp/data"
+mkdir -p "$data"
 log="$tmp/test.log"
 token="wire-smoke-$$-$RANDOM"
-port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
+port="$(python3 -I -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')"
 url="http://127.0.0.1:$port"
 pid=""
-trap 'kill -9 "$pid" 2>/dev/null || true; rm -rf "$tmp"' EXIT
 
-TMPDIR="$tmp" WIRE_STUDIO_KH_DATA_DIR="$tmp/data" WIRE_OPERATOR_TOKEN="$token" KH_TEST_PORT="$port" \
-  "$bin" --test-mode --KH_TEST_PORT "$port" >"$log" 2>&1 &
-pid=$!
+cleanup() {
+  rc=$?
+  if [ -n "$pid" ]; then
+    kill -9 "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  fi
+  rm -rf "$tmp"
+  exit "$rc"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# main.rs names the test data dir from TMPDIR + pid. Hold the wrapper pid steady until the
+# symlink below is in place, so WIRE_STUDIO_KH_DATA_DIR is the directory actually used.
+rm -f "$tmp/pidfile" "$tmp/go"
+TMPDIR="$tmp" bash -c '
+  echo $$ > "$1"
+  while [ ! -f "$2" ]; do sleep 0.05; done
+  shift 2
+  exec "$@"
+' _ "$tmp/pidfile" "$tmp/go" env TMPDIR="$tmp" WIRE_STUDIO_KH_DATA_DIR="$data" \
+    WIRE_OPERATOR_TOKEN="$token" KH_TEST_PORT="$port" "$bin" --test-mode --KH_TEST_PORT "$port" \
+    >"$log" 2>&1 &
+for tries in $(seq 1 100); do [ -s "$tmp/pidfile" ] && break; sleep 0.05; done
+pid="$(cat "$tmp/pidfile" 2>/dev/null || true)"
+if [ -z "$pid" ]; then bad "test-mode launch" "no pid written"; exit 1; fi
+ln -sfn "$data" "$tmp/wire-studio-kh-test-$pid"
+: > "$tmp/go"
 
 ready=0
 for tries in $(seq 1 100); do
@@ -34,57 +73,93 @@ for tries in $(seq 1 100); do
   kill -0 "$pid" 2>/dev/null || break
   sleep 0.1
 done
-[ "$ready" -eq 1 ] && pass "TEST_URL printed" || { bad "TEST_URL not printed (see $log)"; exit 1; }
+if [ "$ready" -eq 1 ]; then pass "TEST_URL printed"; else bad "TEST_URL printed" "absent; log at $log"; exit 1; fi
 
 printed_url="$(grep -m1 '^TEST_URL=' "$log")"
-[ "$printed_url" = "TEST_URL=$url" ] && pass "TEST_URL uses the requested loopback port" || bad "TEST_URL was $printed_url"
+if [ "$printed_url" = "TEST_URL=$url" ]; then pass "TEST_URL uses requested loopback port"; else bad "TEST_URL uses requested loopback port" "$printed_url (expected TEST_URL=$url)"; fi
 printed_token="$(grep -m1 '^TEST_TOKEN=' "$log" | cut -d= -f2-)"
-[ "$printed_token" = "$token" ] && pass "TEST_TOKEN printed" || bad "TEST_TOKEN was $printed_token"
-
-case "$(grep -m1 '^TEST_DATA_DIR=' "$log" || true)" in
-  "TEST_DATA_DIR=$tmp"*) pass "temp data dir used" ;;
-  *) bad "TEST_DATA_DIR does not point into the temp dir" ;;
+if [ "$printed_token" = "$token" ]; then pass "TEST_TOKEN printed"; else bad "TEST_TOKEN printed" "$printed_token (expected $token)"; fi
+printed_dir="$(grep -m1 '^TEST_DATA_DIR=' "$log" || true)"
+case "$printed_dir" in
+  "TEST_DATA_DIR=$tmp"*) pass "TEST_DATA_DIR is inside the fresh temp dir" ;;
+  *) bad "TEST_DATA_DIR is inside the fresh temp dir" "$printed_dir (expected under $tmp)" ;;
 esac
 
 http="$(curl -sS -m 5 -o "$tmp/state" -w '%{http_code}' "$url/api/test/state" || true)"
-[ "$http" = "200" ] && pass "GET /api/test/state is open" || bad "GET state: HTTP $http"
+if [ "$http" = "200" ]; then pass "GET /api/test/state answers 200"; else bad "GET /api/test/state answers 200" "HTTP $http"; fi
+state_keys="$(python3 -I -c '
+import json, sys
+try:
+    value = json.load(open(sys.argv[1]))
+    missing = [key for key in ("paused", "in_flight", "deliveries") if key not in value]
+    print("OK" if not missing else "missing " + ",".join(missing) + "; observed keys " + ",".join(sorted(value)))
+except Exception as error:
+    print("invalid JSON: " + str(error))
+' "$tmp/state")"
+if [ "$state_keys" = "OK" ]; then pass "state JSON has paused, in_flight, deliveries"; else bad "state JSON has paused, in_flight, deliveries" "$state_keys"; fi
+
 http="$(curl -sS -m 5 -o "$tmp/guard" -w '%{http_code}' -X POST "$url/api/test/trigger/schedule" \
-  -H 'Content-Type: application/json' --data '{"text":"x","targets":["telegram:CHAT"],"delay_s":0}' || true)"
-[ "$http" = "403" ] && grep -q 'guard: operator credential required' "$tmp/guard" \
-  && pass "act route without credential refused" || bad "unauthenticated schedule: HTTP $http"
-
-# A hidden headless process must own no windows. System Events may lack permission on a CI box;
-# then the check is reported as not checked rather than silently called a pass.
-window_check=0
-for proc in "Wire Studio KH" "wire-studio-kh"; do
-  count="$(osascript -e "tell application \"System Events\" to count windows of process \"$proc\"" 2>&1)"
-  rc=$?
-  if [ "$rc" -eq 0 ]; then
-    if [ "$count" = "0" ]; then window_check=1; else window_check=2; fi
-    break
-  fi
-done
-if [ "$window_check" -eq 1 ]; then
-  pass "no windows owned by the headless process"
-elif [ "$window_check" -eq 2 ]; then
-  bad "headless process owns $count window(s)"
+  -H 'Content-Type: application/json' --data '{"text":"x","targets":["telegram:TESTCHAT"],"delay_s":0}' || true)"
+guard_error="$(json_field "$tmp/guard" error)"
+if [ "$http" = "403" ] && [ "$guard_error" = "guard: operator credential required" ]; then
+  pass "trigger without operator header is 403 naming the guard"
 else
-  printf 'NOT CHECKED window count (System Events refused the query)\n'
+  bad "trigger without operator header is 403 naming the guard" "HTTP $http error=$guard_error"
 fi
 
-kill -TERM "$pid" 2>/dev/null || true
-exited=0
-for tries in $(seq 1 50); do
-  if ! kill -0 "$pid" 2>/dev/null; then exited=1; break; fi
-  sleep 0.1
-done
-if [ "$exited" -eq 1 ]; then
-  pass "SIGTERM exits cleanly"
+http="$(curl -sS -m 5 -o "$tmp/trigger" -w '%{http_code}' -X POST "$url/api/test/trigger/schedule" \
+  -H "x-wire-operator: $token" -H 'Content-Type: application/json' \
+  --data '{"text":"smoke","targets":["telegram:TESTCHAT"],"delay_s":0}' || true)"
+trigger_id="$(json_field "$tmp/trigger" post_id)"
+if [ "$http" = "200" ] && [ -n "$trigger_id" ]; then
+  pass "trigger with x-wire-operator answers 200"
 else
-  bad "SIGTERM did not exit within 5s"
-  kill -9 "$pid" 2>/dev/null || true
+  bad "trigger with x-wire-operator answers 200" "HTTP $http body=$(cat "$tmp/trigger" 2>/dev/null)"
 fi
-curl -fsS -m 1 "$url/api/test/state" >/dev/null 2>&1 && bad "port still answering after exit" || pass "port released on exit"
+
+# Read-only System Events query: no activate, no clicks, no focus change.
+wout="$(osascript -e 'tell application "System Events" to count windows of process "Wire Studio KH"' 2>&1)"
+wrc=$?
+if [ "$wout" = "0" ]; then
+  pass "no window owned by the headless process"
+elif [ "$wrc" -ne 0 ] && printf '%s' "$wout" | grep -qi 'process'; then
+  pass "no window owned by the headless process (process not listed)"
+else
+  bad "no window owned by the headless process" "count=$wout rc=$wrc"
+fi
+
+term_rc="none"
+kill -TERM "$pid" 2>/dev/null || term_rc="signal failed"
+if [ "$term_rc" = "none" ]; then
+  for tries in $(seq 1 50); do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      wait "$pid" 2>/dev/null; term_rc=$?
+      break
+    fi
+    sleep 0.1
+  done
+fi
+if [ "$term_rc" = "0" ]; then
+  pass "SIGTERM exits 0"
+else
+  bad "SIGTERM exits 0" "$term_rc (expected exit 0 within 5s)"
+fi
+pid=""
+
+port_state="$(python3 -I -c '
+import socket, sys
+sock = socket.socket()
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+try:
+    sock.bind(("127.0.0.1", int(sys.argv[1])))
+    print("free")
+except OSError as error:
+    print("busy: " + str(error))
+finally:
+    sock.close()
+' "$port")"
+if [ "$port_state" = "free" ]; then pass "test port released after exit"; else bad "test port released after exit" "$port_state on $port"; fi
 
 printf '%s\n' "RESULT fails=$fails"
-[ "$fails" -eq 0 ]
+[ "$fails" -eq 0 ] && exit 0
+exit 1

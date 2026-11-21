@@ -15,12 +15,21 @@ use std::time::{Duration, Instant};
 use crate::AppState;
 
 const POLL: Duration = Duration::from_millis(250);
-const DEFAULT_TIMEOUT_S: f64 = 20.0;
-const MAX_TIMEOUT_S: f64 = 30.0;
-const DEFAULT_PAUSE_S: f64 = 120.0;
+const DEFAULT_TIMEOUT_S: u64 = 20;
+const MAX_TIMEOUT_S: u64 = 30;
+const DEFAULT_PAUSE_S: u64 = 120;
+const MIN_PAUSE_S: u64 = 1;
+const MAX_PAUSE_S: u64 = 900;
 static WARNED_NO_TOKEN: AtomicBool = AtomicBool::new(false);
 
 type Shared = Arc<AppState>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TokenDecision {
+    Allowed,
+    Refused,
+    FailOpenLogged,
+}
 
 fn guard<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -55,34 +64,58 @@ fn launcher_token() -> Option<String> {
     (!token.is_empty()).then_some(token)
 }
 
-fn bounded(value: Option<f64>, default: f64, min: f64, max: f64) -> f64 {
-    match value {
-        Some(value) if value.is_finite() => value.clamp(min, max),
-        _ => default,
+/// Seconds from the query: 20 default / 30 ceiling for the settle, 120 default for the pause.
+fn parse_hold_query(query: &str) -> (u64, u64) {
+    let param = |key: &str| {
+        query
+            .trim_start_matches('?')
+            .split('&')
+            .find_map(|pair| {
+                let (name, value) = pair.split_once('=')?;
+                (name == key)
+                    .then(|| value.parse::<f64>().ok())
+                    .flatten()
+                    .filter(|value| value.is_finite())
+                    .map(|value| value.max(0.0) as u64)
+            })
+    };
+    (
+        param("timeout_s").unwrap_or(DEFAULT_TIMEOUT_S).min(MAX_TIMEOUT_S),
+        param("pause_s")
+            .unwrap_or(DEFAULT_PAUSE_S)
+            .clamp(MIN_PAUSE_S, MAX_PAUSE_S),
+    )
+}
+
+/// A browser must not be able to pause the app through loopback; no Origin is fine.
+fn origin_allowed(origin: Option<&str>) -> bool {
+    matches!(origin, None | Some("tauri://localhost"))
+}
+
+/// No token file means fail open; the caller logs that fact once, not on every request.
+fn token_decision(header: Option<&str>, expected: Option<&str>) -> TokenDecision {
+    match expected.filter(|token| !token.is_empty()) {
+        None => TokenDecision::FailOpenLogged,
+        Some(expected) if token_eq(header.unwrap_or(""), expected) => TokenDecision::Allowed,
+        Some(_) => TokenDecision::Refused,
     }
 }
 
-fn number_param(url: &str, key: &str) -> Option<f64> {
-    let (_, query) = url.split_once('?')?;
-    query.split('&').find_map(|pair| {
-        let (name, value) = pair.split_once('=')?;
-        (name == key).then(|| value.parse::<f64>().ok()).flatten()
-    })
+fn pause_expired(paused_until: Option<DateTime<Utc>>, now: DateTime<Utc>) -> bool {
+    paused_until.map_or(false, |until| until <= now)
 }
 
 /// Expire the in-memory pause before any request is handled.
 pub(crate) fn refresh_pause(state: &AppState) {
-    let expired = (*guard(&state.paused_until))
-        .map(|until: DateTime<Utc>| until <= Utc::now())
-        .unwrap_or(false);
-    if expired {
+    let mut until = guard(&state.paused_until);
+    if pause_expired(*until, Utc::now()) {
         state.paused.store(false, Ordering::SeqCst);
-        *guard(&state.paused_until) = None;
+        *until = None;
     }
 }
 
 fn respond(request: tiny_http::Request, status: u16, body: Value) {
-    let text = serde_json::to_string(&body).unwrap_or_else(|_| "{\"error\":\"encode\"}".into());
+    let text = serde_json::to_string(&body).unwrap_or_else(|_| "{\"ok\":false,\"error\":\"encode\"}".into());
     let mut response = tiny_http::Response::from_string(text).with_status_code(status);
     response.add_header(tiny_http::Header::from_bytes("Content-Type", "application/json").expect("header"));
     let _ = request.respond(response);
@@ -109,56 +142,57 @@ fn sending_ids(state: &AppState) -> Vec<String> {
     rows.map(|rows| {
         rows.iter()
             .filter(|row| row.get("state").and_then(Value::as_str) == Some("sending"))
-            .map(|row| match row.get("id") {
-                Some(Value::String(id)) => id.clone(),
-                Some(id) => id.to_string(),
-                None => "delivery (no id)".to_string(),
-            })
+            .filter_map(|row| row.get("id").and_then(Value::as_str))
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
             .collect()
     })
     .unwrap_or_default()
 }
 
-fn take_hold(state: &Shared, url: &str) -> Value {
-    let pause_s = bounded(number_param(url, "pause_s"), DEFAULT_PAUSE_S, 1.0, 900.0);
-    let timeout_s = bounded(number_param(url, "timeout_s"), DEFAULT_TIMEOUT_S, 0.0, MAX_TIMEOUT_S);
-    let until = Utc::now() + chrono::Duration::milliseconds((pause_s * 1000.0) as i64);
+/// Settled means zero in flight before the deadline; unsettled carries ids, never prose.
+fn settle_result(count: usize, ids: Vec<String>, timed_out: bool) -> (bool, Vec<String>) {
+    (!timed_out && count == 0 && ids.is_empty(), ids)
+}
 
-    // Close dispatch before waiting: anything that arrives during the wait stays queued.
-    state.paused.store(true, Ordering::SeqCst);
-    *guard(&state.paused_until) = Some(until);
-
-    let deadline = Instant::now() + Duration::from_secs_f64(timeout_s);
-    let (mut ids, mut count);
-    loop {
-        ids = sending_ids(state);
-        count = in_flight(state);
-        if (count == 0 && ids.is_empty()) || Instant::now() >= deadline {
-            break;
-        }
-        thread::sleep(POLL.min(deadline.saturating_duration_since(Instant::now())));
-    }
-
-    let unsettled = if count == 0 {
-        Vec::new()
-    } else if ids.is_empty() {
-        vec![format!("in_flight={count} (no delivery id)")]
-    } else {
-        ids
-    };
-    let safe = count == 0;
-    eprintln!(
-        "update hold: {} in_flight={} pause_s={}",
-        if safe { "settled" } else { "unsettled" },
-        count,
-        pause_s
-    );
+fn hold_reply(safe: bool, unsettled: Vec<String>, count: usize, pause_s: u64) -> Value {
     json!({
         "safe": safe,
         "unsettled": unsettled,
         "dispatch_paused_s": pause_s,
         "in_flight": count,
     })
+}
+
+fn take_hold(state: &Shared, query: &str) -> Value {
+    let (timeout_s, pause_s) = parse_hold_query(query);
+    let until = Utc::now() + chrono::Duration::seconds(pause_s as i64);
+
+    // Close dispatch before waiting: anything that arrives during the wait stays queued.
+    state.paused.store(true, Ordering::SeqCst);
+    *guard(&state.paused_until) = Some(until);
+
+    let deadline = Instant::now() + Duration::from_secs(timeout_s);
+    let (count, ids, timed_out) = loop {
+        let ids = sending_ids(state);
+        let count = in_flight(state);
+        if count == 0 && ids.is_empty() {
+            break (count, ids, false);
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            break (count, ids, true);
+        }
+        thread::sleep(POLL.min(deadline - now));
+    };
+    let (safe, unsettled) = settle_result(count, ids, timed_out);
+    eprintln!(
+        "update hold: {} in_flight={} pause_s={}",
+        if safe { "settled" } else { "unsettled" },
+        count,
+        pause_s
+    );
+    hold_reply(safe, unsettled, count, pause_s)
 }
 
 fn release(state: &Shared) -> Value {
@@ -174,41 +208,105 @@ pub fn serve(state: Shared, port: u16) -> Result<(), String> {
     for request in server.incoming_requests() {
         refresh_pause(&state);
 
-        // A web page must not be able to pause the app through loopback (L108).
-        if let Some(origin) = header(&request, "Origin").map(str::to_string) {
-            if origin != "tauri://localhost" {
-                respond(request, 403, json!({ "error": "hold refused: origin" }));
-                continue;
-            }
+        if !origin_allowed(header(&request, "Origin")) {
+            respond(request, 403, json!({ "error": "hold refused: origin" }));
+            continue;
         }
 
-        if let Some(expected) = launcher_token() {
-            if !token_eq(header(&request, "x-hold-token").unwrap_or(""), &expected) {
-                respond(request, 403, json!({ "error": "hold refused: token" }));
-                continue;
-            }
-        } else if WARNED_NO_TOKEN
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_ok()
+        let expected = launcher_token();
+        let decision = token_decision(header(&request, "x-hold-token"), expected.as_deref());
+        if decision == TokenDecision::Refused {
+            respond(request, 403, json!({ "error": "hold refused: token" }));
+            continue;
+        }
+        if decision == TokenDecision::FailOpenLogged
+            && WARNED_NO_TOKEN
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
         {
             eprintln!("hold unavailable — no Launcher token; update will be refused while running");
         }
 
-        let path = request.url().split('?').next().unwrap_or("").to_string();
+        let (path, query) = request.url().split_once('?').unwrap_or((request.url(), ""));
         if path != "/api/maintenance/hold" {
             respond(request, 404, json!({ "error": "not found" }));
             continue;
         }
-        let url = request.url().to_string();
-        let method = request.method().as_str().to_uppercase();
-        match method.as_str() {
-            "POST" => {
-                let body = take_hold(&state, &url);
-                respond(request, 200, body);
-            }
-            "DELETE" => respond(request, 200, release(&state)),
-            _ => respond(request, 405, json!({ "error": "hold refused: method" })),
-        }
+        let (status, body) = match request.method().as_str().to_uppercase().as_str() {
+            "POST" => (200, take_hold(&state, query)),
+            "DELETE" => (200, release(&state)),
+            _ => (405, json!({ "error": "hold refused: method" })),
+        };
+        respond(request, status, body);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn query_defaults_and_clamps() {
+        assert_eq!(parse_hold_query(""), (DEFAULT_TIMEOUT_S, DEFAULT_PAUSE_S));
+        assert_eq!(parse_hold_query("?timeout_s=5&pause_s=60"), (5, 60));
+        assert_eq!(parse_hold_query("timeout_s=999&pause_s=9999"), (MAX_TIMEOUT_S, MAX_PAUSE_S));
+        assert_eq!(parse_hold_query("timeout_s=-4&pause_s=0"), (0, MIN_PAUSE_S));
+        assert_eq!(parse_hold_query("timeout_s=nope&pause_s=NaN"), (DEFAULT_TIMEOUT_S, DEFAULT_PAUSE_S));
+        assert_eq!(parse_hold_query("?timeout_s=1e3&pause_s=1.9"), (MAX_TIMEOUT_S, 1));
+    }
+
+    #[test]
+    fn origin_table() {
+        assert!(origin_allowed(None));
+        assert!(origin_allowed(Some("tauri://localhost")));
+        assert!(!origin_allowed(Some("https://evil.example")));
+        assert!(!origin_allowed(Some("tauri://localhost/")));
+        assert!(!origin_allowed(Some("TAURI://localhost")));
+    }
+
+    #[test]
+    fn token_table() {
+        assert_eq!(token_decision(None, None), TokenDecision::FailOpenLogged);
+        assert_eq!(token_decision(Some("x"), None), TokenDecision::FailOpenLogged);
+        assert_eq!(token_decision(Some("x"), Some("")), TokenDecision::FailOpenLogged);
+        assert_eq!(token_decision(Some("abc"), Some("abc")), TokenDecision::Allowed);
+        assert_eq!(token_decision(None, Some("abc")), TokenDecision::Refused);
+        assert_eq!(token_decision(Some("abc"), Some("ABD")), TokenDecision::Refused);
+        assert!(!token_eq("abc", ""));
+    }
+
+    #[test]
+    fn pause_expires_after_the_requested_pause() {
+        let (_, pause_s) = parse_hold_query("?pause_s=120");
+        let now = Utc.with_ymd_and_hms(2026, 11, 21, 1, 2, 3).unwrap();
+        let until = now + chrono::Duration::seconds(pause_s as i64);
+        assert!(!pause_expired(Some(until), now));
+        assert!(!pause_expired(Some(until), now + chrono::Duration::seconds(pause_s as i64 - 1)));
+        assert!(pause_expired(Some(until), now + chrono::Duration::seconds(pause_s as i64)));
+        assert!(pause_expired(Some(now), now));
+        assert!(!pause_expired(None, now + chrono::Duration::days(1)));
+    }
+
+    #[test]
+    fn reply_shape_and_unsettled_ids() {
+        let reply = hold_reply(true, settle_result(0, Vec::new(), false).1, 0, 120);
+        let mut keys: Vec<&str> = reply.as_object().unwrap().keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["dispatch_paused_s", "in_flight", "safe", "unsettled"]);
+        assert_eq!(reply["safe"].as_bool(), Some(true));
+        assert_eq!(reply["in_flight"].as_u64(), Some(0));
+        assert_eq!(reply["dispatch_paused_s"].as_u64(), Some(120));
+
+        let ids = vec!["delivery-1".to_string(), "delivery-2".to_string()];
+        let (safe, unsettled) = settle_result(2, ids.clone(), true);
+        assert!(!safe);
+        assert_eq!(unsettled, ids);
+        let reply = hold_reply(safe, unsettled, 2, 20);
+        assert_eq!(reply["unsettled"], json!(ids));
+        assert!(reply["unsettled"].as_array().unwrap().iter().all(Value::is_string));
+        assert!(!settle_result(0, Vec::new(), true).0);
+        assert!(!settle_result(0, ids, false).0);
+    }
 }

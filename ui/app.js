@@ -145,6 +145,9 @@
   }
 
   function normalizeTarget(target, index) {
+    if (typeof target === 'string') {
+      return { id: target, label: target, platform: target.split(':')[0].toLowerCase(), connection: 'not_configured', reason: '', enabled: true };
+    }
     const platform = String(target.platform || target.kind || target.id || '').toLowerCase();
     return {
       id: String(target.id || target.name || index + 1),
@@ -160,19 +163,21 @@
     const targetsRaw = Array.isArray(source.targets) ? source.targets : Array.isArray(source.channels) ? source.channels : [];
     const telegramRaw = source.telegram && typeof source.telegram === 'object'
       ? source.telegram
-      : targetsRaw.find(t => /telegram/i.test(String(t.platform || t.id || ''))) || {};
+      : targetsRaw.find(t => /telegram/i.test(typeof t === 'string' ? t : String(t.platform || t.id || ''))) || {};
+    const configured = Boolean(telegramRaw.configured || telegramRaw.has_token || telegramRaw.token_set);
     const deliveriesRaw = Array.isArray(source.deliveries) ? source.deliveries
       : Array.isArray(source.queue) ? source.queue
       : Array.isArray(source.rows) ? source.rows : [];
     return {
       dataDir: String(source.data_dir || source.dataDir || ''),
+      appearance: String(source.appearance || ''),
       targets: targetsRaw.map(normalizeTarget),
       telegram: {
-        configured: Boolean(telegramRaw.configured || telegramRaw.has_token || telegramRaw.token_set),
+        configured,
         connection: normalizeConnection(telegramRaw.connection_state || telegramRaw.connectionState || telegramRaw.state),
-        chatId: String(telegramRaw.chat_id || telegramRaw.chatId || ''),
-        last4: lastFour(telegramRaw.token_last4 || telegramRaw.tokenLast4 || telegramRaw.masked_token || telegramRaw.maskedToken || telegramRaw.mask),
-        reason: String(telegramRaw.reason || telegramRaw.error || '')
+        chatId: String(telegramRaw.chat || telegramRaw.chat_id || telegramRaw.chatId || ''),
+        last4: lastFour(telegramRaw.token_masked || telegramRaw.token_last4 || telegramRaw.tokenLast4 || telegramRaw.masked_token || telegramRaw.maskedToken || telegramRaw.mask),
+        reason: String(telegramRaw.reason || telegramRaw.error || (configured ? 'Token and channel saved; this build has not reported a verified connection.' : ''))
       },
       deliveries: deliveriesRaw.map(normalizeDelivery)
     };
@@ -200,16 +205,21 @@
 
   function normalizeDelivery(row, index) {
     const status = String(row.status || row.state || '');
+    const coreShown = String(row.shown_state || row.shownState || '').toLowerCase().replace(/[\s-]+/g, ' ');
     const attempts = Number(row.attempts || 0) || 0;
     const attention = Boolean(row.attention || row.needs_attention);
     const error = String(row.last_error || row.error || '');
     const nextAt = parseWhen(row.next_attempt_at || row.nextAttemptAt || row.next_attempt);
+    const known = ['queued', 'sending', 'sent', 'failed-retry', 'dead', 'needs attention', 'cancelled'];
+    const shown = coreShown === 'attention' ? 'needs attention'
+      : known.includes(coreShown) ? coreShown
+      : shownState(status, attempts, attention, error, nextAt);
+    // shortcut: the 0.1.0 core state has no post text, only a post id; upgrade when state carries text.
+    const text = String(row.text || row.post_text || row.body || (row.post_id ? 'Post ' + row.post_id : 'No post text reported.'));
     return {
-      id: String(row.id || index + 1),
-      text: String(row.text || row.post_text || row.body || 'No post text reported.'),
+      id: String(row.id || index + 1), text,
       target: String(row.target || row.target_label || row.target_name || row.channel || 'Target not reported'),
-      shown: shownState(status, attempts, attention, error, nextAt),
-      nextAt, error, attempts
+      shown, nextAt, error, attempts
     };
   }
 
@@ -621,7 +631,8 @@
   async function saveTelegram(token, chatId) {
     if (!connected) throw new Error('Core is offline — nothing was saved.');
     if (!chatId) throw new Error('Enter the target channel id.');
-    await callCore('save_telegram', { token, chatId });
+    // current core's Rust argument is `chat`; chatId stays in the UI contract.
+    await callCore('save_telegram', { token, chatId, chat: chatId });
     setStatus('Telegram settings saved', 'ok');
     await refreshState();
   }

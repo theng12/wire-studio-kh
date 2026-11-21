@@ -14,7 +14,7 @@ fn guard<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 fn respond(request: tiny_http::Request, status: u16, body: Value) {
-    let text = serde_json::to_string(&body).unwrap_or_else(|_| "{\"error\":\"encode\"}".into());
+    let text = serde_json::to_string(&body).unwrap_or_else(|_| "{\"ok\":false,\"error\":\"encode\"}".into());
     let mut response = tiny_http::Response::from_string(text).with_status_code(status);
     response.add_header(tiny_http::Header::from_bytes("Content-Type", "application/json").expect("header"));
     let _ = request.respond(response);
@@ -38,6 +38,11 @@ fn operator_token(state: &AppState) -> String {
     token
 }
 
+/// Constant-time credential check; a missing header or empty token never grants access.
+fn guard_ok(header: Option<&str>, token: &str) -> bool {
+    hold::token_eq(header.unwrap_or(""), token)
+}
+
 fn value_string(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
@@ -46,10 +51,23 @@ fn value_string(value: &Value) -> String {
     }
 }
 
-fn body(request: &mut tiny_http::Request) -> Value {
+/// Parsing never panics: every bad body gets a 400 carrying the reason.
+fn parse_body(raw: &str) -> Result<Value, String> {
+    let value: Value = serde_json::from_str(raw).map_err(|error| format!("invalid JSON body: {error}"))?;
+    if !value.is_object() {
+        return Err("body must be a JSON object".into());
+    }
+    Ok(value)
+}
+
+fn body(request: &mut tiny_http::Request) -> Result<Value, String> {
     let mut raw = String::new();
-    let _ = request.as_reader().take(1_048_576).read_to_string(&mut raw);
-    serde_json::from_str(&raw).unwrap_or(Value::Null)
+    request
+        .as_reader()
+        .take(1_048_576)
+        .read_to_string(&mut raw)
+        .map_err(|error| format!("cannot read body: {error}"))?;
+    parse_body(&raw)
 }
 
 fn rows(state: &AppState) -> Vec<Value> {
@@ -77,6 +95,7 @@ fn state_reply(state: &Shared) -> Value {
         }
     }
     json!({
+        "ok": true,
         "paused": state.paused.load(std::sync::atomic::Ordering::SeqCst),
         "in_flight": hold::in_flight(state),
         "deliveries": rows,
@@ -122,9 +141,22 @@ fn created_ids(value: Value) -> (String, Vec<String>) {
     (post_id, ids)
 }
 
+/// Cancel and retry name a delivery; report its post and delivery ids like schedule does.
+fn ids_for(state: &AppState, id: &str) -> (String, Vec<String>) {
+    let row = rows(state)
+        .into_iter()
+        .find(|row| row.get("id").and_then(Value::as_str) == Some(id));
+    let post_id = row
+        .as_ref()
+        .and_then(|row| row.get("post_id"))
+        .map(value_string)
+        .unwrap_or_default();
+    (post_id, row.map(|_| vec![id.to_string()]).unwrap_or_default())
+}
+
 fn schedule(state: &Shared, payload: Value) -> (u16, Value) {
     let Some(text) = payload.get("text").and_then(Value::as_str) else {
-        return (400, json!({ "error": "text required" }));
+        return (400, json!({ "ok": false, "error": "text required", "post_id": "", "delivery_ids": [] }));
     };
     let targets: Vec<String> = payload
         .get("targets")
@@ -132,7 +164,7 @@ fn schedule(state: &Shared, payload: Value) -> (u16, Value) {
         .map(|array| array.iter().map(value_string).filter(|s| !s.is_empty()).collect())
         .unwrap_or_default();
     if targets.is_empty() {
-        return (400, json!({ "error": "targets required" }));
+        return (400, json!({ "ok": false, "error": "targets required", "post_id": "", "delivery_ids": [] }));
     }
     // create_post owns dedupe and due time; delay_s is a test-side request only.
     let created = {
@@ -141,14 +173,16 @@ fn schedule(state: &Shared, payload: Value) -> (u16, Value) {
     };
     let (post_id, delivery_ids) = match created {
         Ok(value) => created_ids(value),
-        Err(error) => return (400, json!({ "error": error })),
+        Err(error) => {
+            return (400, json!({ "ok": false, "error": error, "post_id": "", "delivery_ids": [] }))
+        }
     };
-    (200, json!({ "post_id": post_id, "delivery_ids": delivery_ids }))
+    (200, json!({ "ok": true, "post_id": post_id, "delivery_ids": delivery_ids }))
 }
 
 fn trigger(state: &Shared, payload: Value, retry: bool) -> (u16, Value) {
     let Some(id) = payload.get("id").and_then(Value::as_str).map(str::to_string) else {
-        return (400, json!({ "error": "id required" }));
+        return (400, json!({ "ok": false, "error": "id required", "post_id": "", "delivery_ids": [] }));
     };
     let action = if retry { "retry" } else { "cancel" };
     let result = {
@@ -159,13 +193,89 @@ fn trigger(state: &Shared, payload: Value, retry: bool) -> (u16, Value) {
             result_value(store.cancel(&id).map_err(|error| error.to_string()))
         }
     };
+    let (post_id, delivery_ids) = ids_for(state, &id);
     match result {
         Ok(value) => {
             let ok = value != Value::Bool(false);
-            (200, json!({ "ok": ok, "action": action, "id": id, "result": value }))
+            (
+                200,
+                json!({
+                    "ok": ok,
+                    "action": action,
+                    "id": id,
+                    "post_id": post_id,
+                    "delivery_ids": delivery_ids,
+                    "result": value,
+                }),
+            )
         }
-        Err(error) => (400, json!({ "ok": false, "action": action, "id": id, "error": error })),
+        Err(error) => (
+            400,
+            json!({
+                "ok": false,
+                "action": action,
+                "id": id,
+                "post_id": post_id,
+                "delivery_ids": delivery_ids,
+                "error": error,
+            }),
+        ),
     }
+}
+
+/// The Targets dialog's headless equivalent: trim both fields; an empty token keeps the stored one.
+fn telegram_fields(payload: &Value) -> Result<(String, String), &'static str> {
+    let token = payload
+        .get("token")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let chat = payload
+        .get("chat")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if chat.is_empty() {
+        return Err("chat required");
+    }
+    Ok((token, chat))
+}
+
+/// Same secrets and settings helpers as `commands::save_telegram`, without a Tauri window.
+fn save_telegram(state: &AppState, payload: Value) -> (u16, Value) {
+    let (token, chat) = match telegram_fields(&payload) {
+        Ok(fields) => fields,
+        Err(reason) => return (400, json!({ "ok": false, "error": reason })),
+    };
+    let path = crate::secrets::path_in(&state.data_dir);
+    let mut sec = crate::secrets::load(&path);
+    if !token.is_empty() {
+        sec.telegram.bot_token = token;
+    }
+    if sec.telegram.bot_token.is_empty() {
+        return (400, json!({ "ok": false, "error": "bot token required" }));
+    }
+    if let Err(error) = crate::secrets::save(&path, &sec) {
+        return (400, json!({ "ok": false, "error": format!("cannot save telegram token: {error}") }));
+    }
+
+    let sp = crate::settings::path_in(&state.data_dir);
+    let mut cfg = crate::settings::load(&sp);
+    cfg.telegram_chat = chat.clone();
+    if let Err(error) = crate::settings::save(&sp, &cfg) {
+        return (400, json!({ "ok": false, "error": format!("cannot save telegram channel: {error}") }));
+    }
+    (
+        200,
+        json!({
+            "ok": true,
+            "configured": true,
+            "chat": chat,
+            "token_masked": crate::secrets::mask(&sec.telegram.bot_token),
+        }),
+    )
 }
 
 /// Bind loopback only; a bind failure is returned to main.rs instead of opening a window.
@@ -186,25 +296,66 @@ pub fn serve(state: Shared, port: u16) -> Result<(), String> {
             continue;
         }
 
+        let action = match (method.as_str(), path.as_str()) {
+            ("POST", "/api/test/trigger/schedule") => "schedule",
+            ("POST", "/api/test/trigger/cancel") => "cancel",
+            ("POST", "/api/test/trigger/retry") => "retry",
+            ("POST", "/api/test/trigger/save-telegram") => "save-telegram",
+            _ => {
+                let reason = format!("unknown route: {} {}", method.as_str(), path.as_str());
+                respond(request, 404, json!({ "ok": false, "error": reason }));
+                continue;
+            }
+        };
+
         let given = request
             .headers()
             .iter()
             .find(|h| h.field.equiv("x-wire-operator"))
-            .map(|h| h.value.as_str().to_string())
-            .unwrap_or_default();
-        if !hold::token_eq(&given, &token) {
-            respond(request, 403, json!({ "error": "guard: operator credential required" }));
+            .map(|h| h.value.as_str().to_string());
+        if !guard_ok(given.as_deref(), &token) {
+            respond(request, 403, json!({ "ok": false, "error": "guard: operator credential required" }));
             continue;
         }
 
-        let payload = body(&mut request);
-        let (status, reply) = match (method.as_str(), path.as_str()) {
-            ("POST", "/api/test/trigger/schedule") => schedule(&state, payload),
-            ("POST", "/api/test/trigger/cancel") => trigger(&state, payload, false),
-            ("POST", "/api/test/trigger/retry") => trigger(&state, payload, true),
-            _ => (404, json!({ "error": "not found" })),
+        let payload = match body(&mut request) {
+            Ok(value) => value,
+            Err(reason) => {
+                respond(request, 400, json!({ "ok": false, "error": reason }));
+                continue;
+            }
+        };
+        let (status, reply) = match action {
+            "schedule" => schedule(&state, payload),
+            "cancel" => trigger(&state, payload, false),
+            "save-telegram" => save_telegram(&state, payload),
+            _ => trigger(&state, payload, true),
         };
         respond(request, status, reply);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn credential_guard() {
+        assert!(guard_ok(Some("secret"), "secret"));
+        assert!(!guard_ok(None, "secret"));
+        assert!(!guard_ok(Some(""), "secret"));
+        assert!(!guard_ok(Some("wrong"), "secret"));
+        assert!(!guard_ok(Some(""), ""));
+        assert!(!guard_ok(Some("secret"), "secret "));
+    }
+
+    #[test]
+    fn malformed_bodies_carry_a_reason() {
+        assert!(parse_body("").unwrap_err().contains("invalid JSON body"));
+        assert!(parse_body("{\"id\":").unwrap_err().contains("invalid JSON body"));
+        assert!(parse_body("[]").unwrap_err().contains("body must be a JSON object"));
+        assert!(parse_body("null").unwrap_err().contains("body must be a JSON object"));
+        assert_eq!(parse_body("{\"text\":\"x\"}").unwrap()["text"], "x");
+    }
 }

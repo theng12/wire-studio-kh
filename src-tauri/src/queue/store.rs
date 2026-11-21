@@ -304,12 +304,12 @@ impl Store {
 
     pub fn queue_view(&self) -> rusqlite::Result<Vec<DeliveryRow>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, post_id, target, state, attempts, next_attempt_at, last_error, \
-             attention, remote_id, remote_url, sent_late_minutes \
-             FROM deliveries ORDER BY rowid DESC",
+            "SELECT d.id, d.post_id, p.text, d.target, d.state, d.attempts, d.next_attempt_at, \
+             d.last_error, d.attention, d.remote_id, d.remote_url, d.sent_late_minutes \
+             FROM deliveries d JOIN posts p ON p.id = d.post_id ORDER BY d.rowid DESC",
         )?;
         let rows = stmt.query_map([], |r| {
-            let state: String = r.get(3)?;
+            let state: String = r.get(4)?;
             let shown_state = match state.as_str() {
                 PENDING => "queued",
                 SENDING => "sending",
@@ -323,16 +323,17 @@ impl Store {
             Ok(DeliveryRow {
                 id: r.get(0)?,
                 post_id: r.get(1)?,
-                target: r.get(2)?,
+                text: r.get(2)?,
+                target: r.get(3)?,
                 state,
                 shown_state,
-                attempts: r.get(4)?,
-                next_attempt_at: r.get(5)?,
-                last_error: r.get(6)?,
-                attention: r.get::<_, i64>(7)? != 0,
-                remote_id: r.get(8)?,
-                remote_url: r.get(9)?,
-                sent_late_minutes: r.get(10)?,
+                attempts: r.get(5)?,
+                next_attempt_at: r.get(6)?,
+                last_error: r.get(7)?,
+                attention: r.get::<_, i64>(8)? != 0,
+                remote_id: r.get(9)?,
+                remote_url: r.get(10)?,
+                sent_late_minutes: r.get(11)?,
             })
         })?;
         rows.collect()

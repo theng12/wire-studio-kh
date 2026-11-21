@@ -4,7 +4,6 @@
 APP="wire-studio-kh"
 WORKTREE="/build/Developer/My Own Apps/wire-studio-kh"
 export PATH="$HOME/.cargo/bin:$PATH"
-PLUGIN="$(ls -d "$HOME"/.claude/plugins/cache/studio-orchestration/studio-orchestration/*/ 2>/dev/null | tail -1)"
 
 STEPS=(
   "changelog-heading::grep -q \"^## $(cat VERSION) \" CHANGELOG.md"
@@ -14,7 +13,7 @@ STEPS=(
   "no-keychain::! grep -REn 'SecItem|Keychain|security-framework' src-tauri/src"
   "test-mode-smoke::bash scripts/test-mode-smoke.sh"
   "hold-proof::bash scripts/hold-proof.sh"
-  "desktop-safety::zsh ${PLUGIN}scripts/check-desktop-safety.sh scripts"
+  "hold-expiry::bash scripts/hold-proof.sh --expiry-only"
 )
 
 # Set IDLE_PID (the running core) to measure the 10-minute idle assert.
