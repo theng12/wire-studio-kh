@@ -1,6 +1,6 @@
 #!/bin/bash
-# Publish Wire Studio KH 0.1.0 to the signed feed on 1301 and read it back.
-# Run after `npx tauri build --bundles dmg` produced the DMG.
+# Publish the current VERSION to the signed feed on 1301 and read it back.
+# The feed entry for `wire` already exists after 0.1.0, so no --new-app.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -30,8 +30,7 @@ K=~/Library/KHUpdater
   --changelog ~/$REMOTE_DIR/CHANGELOG.md \
   --name 'Wire Studio KH' \
   --kind app-dmg \
-  --hold-url 'http://127.0.0.1:8649/api/maintenance/hold' \
-  --allow-same
+  --hold-url 'http://127.0.0.1:8649/api/maintenance/hold'
 "
 
 echo "--- feed readback from 1301 ---"

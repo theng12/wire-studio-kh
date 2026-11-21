@@ -1,7 +1,22 @@
 # Wire Studio KH 0.2.0 — first slice receipt (2026-11-21)
 
-**State: import core done and tested; no release.** 0.2.0 as a batch is not finished —
-the pool builder, recipes editor, renderer and the real Production import are still ahead.
+**State: 0.2.0 published 2026-11-21T12:21:02Z**, after the route run reproduced the core
+test's numbers. Retention: 0.2.0 current, 0.1.0 previous, both in `dist/` and on the feed.
+
+## Published artifact
+
+| | |
+|---|---|
+| DMG | `Wire Studio KH_0.2.0_aarch64.dmg`, 4,519,392 bytes |
+| SHA-256 | `658df5ab137f8b4eb521ff65bc413a27104841207731dedd1f54392157efe4b8` |
+| Signature | `KH Studio Local Signing`, signed app + DMG, not notarized |
+| Secret scan | PASS on the exact published bytes |
+| Preflight | PASS |
+| Feed | `wire` 0.2.0, bundleID `com.terranash.wirestudiokh`, `holdURL` present (`holdSince 0.1.0`), previous 0.1.0 |
+| Read-back | PASS, sha matched from 1301 |
+
+0.2.0 as a batch is **not** complete: the background pool, recipes editor, Khmer
+typography and the renderer are still ahead; this release carries the import.
 
 ## What is done
 
@@ -54,12 +69,32 @@ The run is reproducible with
 These three are the reason the import is honest rather than merely green: a fixture could
 not have found any of them.
 
+## The route run (app's own path, after the core test)
+
+The core test ran on a temp data dir **before** this route run; the route run then
+reproduced the same numbers through `POST /api/test/trigger/import` on a headless
+binary, against the same staged Production channel:
+
+| Assert | Result |
+|---|---|
+| A caller without the operator credential | refused (403), guard named |
+| Preview | 9 posts |
+| Import | 9 posts, 0 skipped |
+| Images | 30 copied, 47,164,542 bytes — identical to the core test |
+| Recipes / ledger / pool index | 9 / written / written |
+| Second run | copied nothing |
+| Story's files after the run | byte-identical (shell snapshot before/after) |
+
+`scripts/import-route-proof.sh` — **13/13 PASS, fails=0**. Reproduce with
+`bash scripts/import-route-proof.sh`.
+
 ## What this proof is, and what it is not
 
-This is **proven through the core test on a temp data dir**: the scan and apply ran as
-unit tests against the staged Production channel and a scratch Wire data directory.
-The binary build and a run driven through the app's own import route still owe one pass,
-deferred while Hub's gate holds the heavy lane; publishing 0.2.0 waits for that pass.
+It is a real-data import driven through the app's own route, with the core test that
+preceded it. What it still cannot show: the import was run against a staged copy of the
+Production channel, not on the Production Mac itself; the shipped-window click-through of
+the Import screen has not been done; and no Story channel has been retired — that stays a
+separate Story-side change.
 - Recipes link by id rather than writing `wire.db` post rows.
 - Imported recipes carry `renderable:false` because Wire has no layer renderer yet.
 - Account/token import needs a secrets schema change and belongs with the next batch.
