@@ -1,8 +1,22 @@
 # Wire Studio KH 0.1.0 — build receipt (2026-11-21)
 
-**State: built and tested, not yet packaged or published.** No DMG, no feed entry,
-no install. Commit `1bff642` on `main` of the new repo
-`~/Developer/My Own Apps/wire-studio-kh`.
+**State: built, tested and packaged; not published.** The signed DMG exists and
+passes every check; the feed entry is **not** written — publishing to the public
+signed feed needs the owner's explicit go-ahead (the permission layer refused a
+peer session's instruction for a new public surface, correctly). Commit `1bff642`
++ packaging changes on `main` of `~/Developer/My Own Apps/wire-studio-kh`.
+
+## Artifact
+
+| | |
+|---|---|
+| DMG | `src-tauri/target/release/bundle/dmg/Wire Studio KH_0.1.0_aarch64.dmg` |
+| Size | 4,436,182 bytes (4.23 MiB) |
+| SHA-256 | `04ffe200c77ad0e5051dfe5596693289ff55519cd7c551e58066efd2899dada5` |
+| Signature | `KH Studio Local Signing`, signed app + DMG; not notarized (house) |
+| Secret scan | PASS on the exact published bytes (`scripts/scan-dmg.sh`) |
+| Preflight | PASS (`release-preflight.sh wire 0.1.0 …`) |
+| Feed | not yet written; `wire` absent from the 12-app signed feed |
 
 ## What runs
 
@@ -48,8 +62,11 @@ no install. Commit `1bff642` on `main` of the new repo
   config, Story's secret store, bounded token-pattern scan). The owner offered one
   line; until then dispatch parks posts at "needs attention: add a Telegram bot
   token", which is the honest state.
-- **Idle footprint: measured 60 s only, not the 10-minute assert.** 10-minute run
-  with timer-wake counting is still to do.
+- **Idle footprint, measured 2026-11-21 (10-minute run, empty queue, window closed):**
+  RSS 13,632 KB at start → 13,664 KB at 600 s (+32 KB), CPU 0.02 s total over
+  10 minutes, 16 file descriptors and 13 threads unchanged throughout, test port and
+  hold port both freed on SIGTERM. No polling loop: the only wake is the timer to the
+  next due row.
 - **UI verified headlessly against mocked state only** (the UI agent's browser
   checks). The window was never opened on the owner's desktop, so the shipped-app
   click-through is not yet proven.
