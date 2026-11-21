@@ -154,6 +154,15 @@ fn ids_for(state: &AppState, id: &str) -> (String, Vec<String>) {
     (post_id, row.map(|_| vec![id.to_string()]).unwrap_or_default())
 }
 
+/// Test-side scheduling: a positive delay moves the post's queued rows into the future.
+fn delay_s(payload: &Value) -> i64 {
+    payload
+        .get("delay_s")
+        .and_then(Value::as_i64)
+        .filter(|seconds| *seconds > 0)
+        .unwrap_or(0)
+}
+
 fn schedule(state: &Shared, payload: Value) -> (u16, Value) {
     let Some(text) = payload.get("text").and_then(Value::as_str) else {
         return (400, json!({ "ok": false, "error": "text required", "post_id": "", "delivery_ids": [] }));
@@ -167,9 +176,20 @@ fn schedule(state: &Shared, payload: Value) -> (u16, Value) {
         return (400, json!({ "ok": false, "error": "targets required", "post_id": "", "delivery_ids": [] }));
     }
     // create_post owns dedupe and due time; delay_s is a test-side request only.
+    let delay = delay_s(&payload);
     let created = {
         let mut store = guard(&state.store);
-        result_value(store.create_post(text, &targets).map_err(|error| error.to_string()))
+        let created = result_value(store.create_post(text, &targets).map_err(|error| error.to_string()));
+        if let Ok(value) = &created {
+            let (post_id, _) = created_ids(value.clone());
+            if delay > 0 {
+                let at = chrono::Utc::now() + chrono::Duration::seconds(delay);
+                if let Err(error) = store.set_next_attempt_for_post(&post_id, at) {
+                    return (400, json!({ "ok": false, "error": format!("cannot delay post: {error}"), "post_id": post_id, "delivery_ids": [] }));
+                }
+            }
+        }
+        created
     };
     let (post_id, delivery_ids) = match created {
         Ok(value) => created_ids(value),
@@ -357,5 +377,19 @@ mod tests {
         assert!(parse_body("[]").unwrap_err().contains("body must be a JSON object"));
         assert!(parse_body("null").unwrap_err().contains("body must be a JSON object"));
         assert_eq!(parse_body("{\"text\":\"x\"}").unwrap()["text"], "x");
+    }
+
+    #[test]
+    fn schedule_fields() {
+        assert_eq!(delay_s(&json!({"delay_s": 30})), 30);
+        assert_eq!(delay_s(&json!({"delay_s": 0})), 0);
+        assert_eq!(delay_s(&json!({"delay_s": -5})), 0);
+        assert_eq!(delay_s(&json!({})), 0);
+        assert_eq!(
+            telegram_fields(&json!({"token": " t ", "chat": " @c "})),
+            Ok(("t".to_string(), "@c".to_string()))
+        );
+        assert_eq!(telegram_fields(&json!({"token": "t"})), Err("chat required"));
+        assert_eq!(telegram_fields(&json!({"chat": "  "})), Err("chat required"));
     }
 }
