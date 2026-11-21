@@ -65,6 +65,9 @@ PY
 grep -q '^imported 9$' "$tmp/assert.txt" && pass "route imported 9 posts" || bad "route imported 9 posts" "$(tr '\n' ' ' < "$tmp/assert.txt")"
 grep -q '^skipped 0$' "$tmp/assert.txt" && pass "route skipped none" || bad "route skipped none" "$(tr '\n' ' ' < "$tmp/assert.txt")"
 grep -q '^unchanged True$' "$tmp/assert.txt" && pass "route reports the source unchanged" || bad "route reports the source unchanged" "$(tr '\n' ' ' < "$tmp/assert.txt")"
+# Same numbers as the core test on a temp data dir: 30 files, 47,164,542 bytes.
+grep -q '^files 30$' "$tmp/assert.txt" && pass "route copied 30 images" || bad "route copied 30 images" "$(tr '\n' ' ' < "$tmp/assert.txt")"
+grep -q '^bytes 47164542$' "$tmp/assert.txt" && pass "route copied 47,164,542 bytes" || bad "route copied 47,164,542 bytes" "$(tr '\n' ' ' < "$tmp/assert.txt")"
 
 ls "$tmp/data/recipes" 2>/dev/null | wc -l | tr -d ' ' > "$tmp/recipes"
 [ "$(cat "$tmp/recipes")" = "9" ] && pass "9 recipes written" || bad "9 recipes written" "found $(cat "$tmp/recipes")"
