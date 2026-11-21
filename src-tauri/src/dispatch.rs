@@ -7,7 +7,9 @@ use std::time::Duration;
 
 use chrono::Utc;
 
-use crate::adapters::{classify, telegram::TelegramAdapter, FailureClass, PublishPayload};
+use crate::adapters::{
+    classify, telegram::TelegramAdapter, FailureClass, PlatformAdapter, PublishPayload,
+};
 use crate::queue::Failure;
 use crate::secrets;
 use crate::Shared;

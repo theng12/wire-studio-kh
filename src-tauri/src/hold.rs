@@ -48,12 +48,12 @@ pub(crate) fn token_eq(actual: &str, expected: &str) -> bool {
     diff == 0
 }
 
-fn header<'a>(request: &'a tiny_http::Request, name: &str) -> Option<&'a str> {
+fn header(request: &tiny_http::Request, name: &'static str) -> Option<String> {
     request
         .headers()
         .iter()
         .find(|h| h.field.equiv(name))
-        .map(|h| h.value.as_str())
+        .map(|h| h.value.as_str().to_string())
 }
 
 /// The Launcher rotates this file; read it on every call, never cache it.
@@ -208,13 +208,13 @@ pub fn serve(state: Shared, port: u16) -> Result<(), String> {
     for request in server.incoming_requests() {
         refresh_pause(&state);
 
-        if !origin_allowed(header(&request, "Origin")) {
+        if !origin_allowed(header(&request, "Origin").as_deref()) {
             respond(request, 403, json!({ "error": "hold refused: origin" }));
             continue;
         }
 
         let expected = launcher_token();
-        let decision = token_decision(header(&request, "x-hold-token"), expected.as_deref());
+        let decision = token_decision(header(&request, "x-hold-token").as_deref(), expected.as_deref());
         if decision == TokenDecision::Refused {
             respond(request, 403, json!({ "error": "hold refused: token" }));
             continue;
