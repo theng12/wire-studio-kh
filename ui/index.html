@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Wire Studio KH 0.1.0</title>
+  <title>Wire Studio KH 0.3.0</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -27,7 +27,7 @@
   <div class="app">
     <aside class="sidebar" aria-label="Sidebar">
       <div class="brand">
-        <span class="brand-seal" aria-hidden="true"></span>
+        <img class="brand-mark" src="logo.svg" alt="" width="28" height="28">
         <span class="brand-text"><strong>Wire Studio</strong><small>Text dispatch</small></span>
       </div>
 
@@ -42,7 +42,7 @@
       <div class="sidebar-footer">
         <button class="support" id="supportBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-heart"/></svg><span class="support-label">Support this app</span></button>
         <div class="footer-band">
-          <button class="version-pill" id="whatsNewBtn" type="button" title="What's New" aria-label="Wire Studio KH 0.1.0, open What's New"><span class="pill-name">Wire Studio KH</span> <span class="pill-version">0.1.0</span></button>
+          <button class="version-pill" id="whatsNewBtn" type="button" title="What's New" aria-label="Wire Studio KH 0.3.0, open What's New"><span class="pill-name">Wire Studio KH</span> <span class="pill-version">0.3.0</span></button>
           <button class="icon-button" id="updateBtn" type="button" title="Check for updates" aria-label="Check for updates"><svg class="icon" aria-hidden="true"><use href="#i-update"/></svg></button>
         </div>
         <p class="footer-status" id="statusLine" role="status" aria-live="polite">Checking core…</p>
@@ -67,7 +67,7 @@
           <div class="field">
             <label for="postText">Post text</label>
             <textarea id="postText" rows="7" placeholder="Write your post here…" spellcheck="true"></textarea>
-            <p class="help">Plain text only — no AI, formatting or media in 0.1.0.</p>
+            <p class="help">One caption per post. No AI and no formatting.</p>
             <p class="counter" id="charCount">0 characters</p>
           </div>
           <fieldset class="field">
@@ -175,9 +175,9 @@
 
       <section class="view" id="settingsView" aria-label="Settings" hidden>
         <div class="card">
-          <div class="card-head"><h2>This app</h2><span class="hint">Version 0.1.0</span></div>
+          <div class="card-head"><h2>This app</h2><span class="hint">Version 0.3.0</span></div>
           <div class="setting-row">
-            <div><label for="dataFolder">Data folder</label><p class="help">Read from the core; Browse… is a hook stub in 0.1.0.</p></div>
+            <div><label for="dataFolder">Data folder</label><p class="help">Read from the core; Browse… is not wired yet.</p></div>
             <div class="path-field"><input type="text" id="dataFolder" value="Not reported by core" readonly><button class="button subtle" data-browse="data" type="button">Browse…</button></div>
           </div>
         </div>
@@ -209,7 +209,8 @@
         <div class="card">
           <div class="card-head"><h2>About</h2></div>
           <div class="setting-row">
-            <div><span class="field-label">Wire Studio KH 0.1.0</span><p class="help">Free and unlocked. What's New lists this release's changes.</p></div>
+            <img class="about-mark" src="logo.svg" alt="" width="44" height="44">
+            <div><span class="field-label">Wire Studio KH 0.3.0</span><p class="help">Free and unlocked. What's New lists this release's changes.</p></div>
             <div class="button-row"><button class="button subtle" id="aboutWhatsNewBtn" type="button">What's New</button><button class="button subtle" id="aboutSupportBtn" type="button">Support</button></div>
           </div>
         </div>

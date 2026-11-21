@@ -1,4 +1,4 @@
-/* Wire Studio KH 0.1.0 — Paper style. One accent: dispatch vermilion. */
+/* Wire Studio KH 0.3.0 — Paper style. One accent: dispatch vermilion. */
 
 :root {
   --paper: #FAF8F4;
@@ -122,8 +122,10 @@ button { cursor: pointer; }
   padding: var(--sp-3) var(--sp-2) var(--sp-2);
 }
 .brand { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-2) var(--sp-3); }
-.brand-seal { position: relative; width: 28px; height: 28px; flex: none; border-radius: var(--r-card); background: var(--accent); }
-.brand-seal::after { content: ""; position: absolute; inset: 7px; border: 2px solid #fff; border-radius: 3px; transform: rotate(-8deg); }
+.brand-mark, .about-mark, .state-mark { flex: none; }
+.brand-mark { width: 28px; height: 28px; }
+.about-mark { width: 44px; height: 44px; }
+.state-mark { width: 44px; height: 44px; }
 .brand-text { display: grid; line-height: 1.25; }
 .brand-text strong { font-size: 13px; letter-spacing: -.01em; }
 .brand-text small { font-size: 11px; color: var(--muted); }

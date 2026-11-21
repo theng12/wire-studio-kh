@@ -1,12 +1,14 @@
 'use strict';
 
 (() => {
-  const APP_VERSION = '0.1.0';
+  const APP_VERSION = '0.3.0';
   const WHATS_NEW = [
-    'First release: the app opens, and you can write a text post, pick a Telegram channel, schedule it, and see what happened on each target.',
-    'The queue is the home screen. Every post is one row per channel, so a double post is impossible.',
-    'The app can be held for an update: it stops taking new work, lets in-flight posts settle, and resumes by itself.',
-    'Secrets live in one locked-down file on this Mac. No Keychain, no password prompts.'
+    'Two more places to post: a YouTube channel and a Facebook Page.',
+    'Each place has named format sizes — YouTube landscape and Shorts, Facebook square, portrait and link card, Telegram text — with size, ratio, text limit and safe area shown before you send.',
+    'One post can go to several places and several sizes; every pair is its own line in the queue.',
+    'Instagram is designed and shelved: nothing is built and it never appears here.',
+    'Refusals stay honest: a wrong size is refused by name, a sign-in problem goes to Needs attention instead of retrying forever.',
+    'The app icon is your pick — the dispatch line.'
   ];
   const SUPPORT_URL = 'https://nowpayments.io/donation/studiokh';
   const TEST_ROUTES = {
@@ -477,8 +479,12 @@
   }
 
   function stateBlock(kind, title, detail, actionLabel, onAction) {
+    // An empty state is where the app introduces itself: the owner's mark, not a generic icon.
+    const lead = kind === 'empty'
+      ? el('img', { class: 'state-mark', src: 'logo.svg', alt: '', width: '44', height: '44' })
+      : icon(kind === 'error' ? 'cancel' : 'update');
     const block = el('div', { class: 'state-block' },
-      icon(kind === 'error' ? 'cancel' : kind === 'empty' ? 'queue' : 'update'),
+      lead,
       el('h3', { text: title }), el('p', { text: detail })
     );
     if (actionLabel) block.append(el('button', { class: 'button subtle', type: 'button', text: actionLabel, on: { click: onAction } }));
@@ -980,7 +986,7 @@
   function browseDialog() {
     openDialog({
       title: 'Choose a folder',
-      body: 'Folder picking is a hook stub in 0.1.0. The core owns the data folder shown in Settings; nothing was changed.',
+      body: 'Folder picking is not wired yet. The core owns the data folder shown in Settings; nothing was changed.',
       confirmLabel: 'Done', cancelLabel: null
     });
   }
