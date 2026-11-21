@@ -1,14 +1,13 @@
 'use strict';
 
 (() => {
-  const APP_VERSION = '0.3.0';
+  // Fallback only: the core reports the real version and applyVersion() uses it.
+  let APP_VERSION = '0.3.1';
   const WHATS_NEW = [
-    'Two more places to post: a YouTube channel and a Facebook Page.',
-    'Each place has named format sizes — YouTube landscape and Shorts, Facebook square, portrait and link card, Telegram text — with size, ratio, text limit and safe area shown before you send.',
-    'One post can go to several places and several sizes; every pair is its own line in the queue.',
-    'Instagram is designed and shelved: nothing is built and it never appears here.',
-    'Refusals stay honest: a wrong size is refused by name, a sign-in problem goes to Needs attention instead of retrying forever.',
-    'The app icon is your pick — the dispatch line.'
+    'The Telegram card now tells one truth: connected only when Telegram confirms the bot and channel, "saved, not verified" when both are stored but unconfirmed, and Telegram\'s own words when the check fails.',
+    'Saving a token and channel checks them with Telegram straight away — who the bot is, and whether it can see that channel.',
+    'The version in the footer, About and Settings comes from the build itself now, so it always matches the app you are running.',
+    'Still here from 0.3.0: YouTube upload, Facebook Pages, named format sizes and one post to many places at once.'
   ];
   const SUPPORT_URL = 'https://nowpayments.io/donation/studiokh';
   const TEST_ROUTES = {
@@ -227,9 +226,23 @@
 
   function normalizeConnection(value) {
     const text = String(value || '').toLowerCase().replace(/[\s-]+/g, '_');
-    if (['ready', 'ok', 'connected', 'configured', 'live'].includes(text)) return 'ready';
+    if (['ready', 'ok', 'connected', 'live'].includes(text)) return 'ready';
+    // configured = saved and never verified; the core never calls that connected.
+    if (text === 'configured') return 'configured';
     if (['failed', 'error', 'bad', 'off', 'unsupported'].includes(text)) return 'failed';
     return 'not_configured';
+  }
+
+  // One word per state, the same word the core used. Saved is never shown as connected.
+  function connectionLabel(connection) {
+    if (connection === 'ready') return 'connected';
+    if (connection === 'configured') return 'saved, not verified';
+    if (connection === 'failed') return 'connection failed';
+    return 'not configured';
+  }
+
+  function connectionLevel(connection) {
+    return connection === 'ready' ? 'ok' : connection === 'failed' ? 'bad' : 'off';
   }
 
   function lastFour(value) {
@@ -273,18 +286,26 @@
         maxTextLength: countOf(pickField(item, 'max_text_length', 'maxTextLength', 'max_length'))
       }))
       .filter(preset => preset.id && preset.platform) : [];
+    const telegram = {
+      configured,
+      connection: normalizeConnection(telegramRaw.connection_state || telegramRaw.connectionState || telegramRaw.state),
+      chatId: String(telegramRaw.chat || telegramRaw.chat_id || telegramRaw.chatId || ''),
+      last4: lastFour(telegramRaw.token_masked || telegramRaw.token_last4 || telegramRaw.tokenLast4 || telegramRaw.masked_token || telegramRaw.maskedToken || telegramRaw.mask),
+      reason: String(telegramRaw.reason || telegramRaw.error || (configured ? 'Token and channel saved; this build has not reported a verified connection.' : ''))
+    };
+    // A bare "telegram:<chat>" target carries no state of its own; the telegram
+    // block's verdict is the same channel, so the composer must not say otherwise.
+    const targets = targetsRaw.map(normalizeTarget).map(target =>
+      target.platform === 'telegram' && target.connection === 'not_configured' && telegram.connection !== 'not_configured'
+        ? { ...target, connection: telegram.connection, reason: telegram.reason }
+        : target);
     return {
+      version: String(source.version || ''),
       dataDir: String(source.data_dir || source.dataDir || ''),
       appearance: String(source.appearance || ''),
-      targets: targetsRaw.map(normalizeTarget),
+      targets,
       presets,
-      telegram: {
-        configured,
-        connection: normalizeConnection(telegramRaw.connection_state || telegramRaw.connectionState || telegramRaw.state),
-        chatId: String(telegramRaw.chat || telegramRaw.chat_id || telegramRaw.chatId || ''),
-        last4: lastFour(telegramRaw.token_masked || telegramRaw.token_last4 || telegramRaw.tokenLast4 || telegramRaw.masked_token || telegramRaw.maskedToken || telegramRaw.mask),
-        reason: String(telegramRaw.reason || telegramRaw.error || (configured ? 'Token and channel saved; this build has not reported a verified connection.' : ''))
-      },
+      telegram,
       deliveries: deliveriesRaw.map(normalizeDelivery)
     };
   }
@@ -330,6 +351,21 @@
     };
   }
 
+  // The core's version is the app's version (it comes from the build); the
+  // constant above is only a fallback for a UI opened without a core.
+  function applyVersion() {
+    const version = state.version || APP_VERSION;
+    APP_VERSION = version;
+    $$('.pill-version').forEach(node => { node.textContent = version; });
+    const about = $('#aboutVersion');
+    if (about) about.textContent = 'Wire Studio KH ' + version;
+    const hint = $('#settingsVersion');
+    if (hint) hint.textContent = 'Version ' + version;
+    document.title = 'Wire Studio KH ' + version;
+    $('#whatsNewBtn').setAttribute('aria-label', 'Wire Studio KH ' + version + ', open What\'s New');
+    return version;
+  }
+
   async function refreshState() {
     setStatus(connected ? 'Refreshing…' : 'Checking core…', 'info');
     try {
@@ -337,6 +373,7 @@
       coreError = null;
       connected = true;
       setStatus('Core connected', 'ok');
+      applyVersion();
     } catch (err) {
       coreError = message(err);
       connected = false;
@@ -405,7 +442,7 @@
       host.append(el('label', { class: 'check', for: inputId },
         el('input', { type: 'checkbox', name: 'target', id: inputId, value: target.id, disabled: !connected || !target.enabled }),
         el('span', { text: target.label }),
-        el('span', { class: 'chip', 'data-level': target.connection === 'ready' ? 'ok' : target.connection === 'failed' ? 'bad' : 'off', text: target.connection.replace('_', ' ') })
+        el('span', { class: 'chip', 'data-level': connectionLevel(target.connection), text: connectionLabel(target.connection) })
       ));
     });
   }
@@ -595,19 +632,20 @@
   function renderTargets() {
     const telegram = state.telegram;
     const chip = $('#telegramChip');
-    chip.textContent = telegram.connection.replace('_', ' ');
-    chip.dataset.level = telegram.connection === 'ready' ? 'ok' : telegram.connection === 'failed' ? 'bad' : 'off';
+    chip.textContent = connectionLabel(telegram.connection);
+    chip.dataset.level = connectionLevel(telegram.connection);
     $('#telegramReason').textContent = telegram.reason ||
       (telegram.connection === 'ready' ? 'Connection verified by the core.'
         : telegram.connection === 'failed' ? 'Connection failed; no reason reported by the core.'
-          : 'No verified connection reported. Add a token and channel id to connect.');
+          : telegram.connection === 'configured' ? 'Token and channel saved; replace the token to check them with Telegram.'
+            : 'No verified connection reported. Add a token and channel id to connect.');
     $('#telegramToken').textContent = telegram.last4
       ? 'Saved token •••• ' + telegram.last4
       : telegram.configured ? 'Saved token (last four not reported)' : 'No token saved';
     $('#telegramManageBtn').textContent = telegram.configured ? 'Replace token' : 'Add token';
     const chatInput = $('#telegramChatId');
     if (document.activeElement !== chatInput) chatInput.value = telegram.chatId;
-    $('#settingsTelegramHelp').textContent = 'Telegram is ' + telegram.connection.replace('_', ' ') + '. Manage the target here.';
+    $('#settingsTelegramHelp').textContent = 'Telegram is ' + connectionLabel(telegram.connection) + '. Manage the target here.';
     renderPlatformCard('youtube', '#youtubeChip', '#youtubeReason');
     renderPlatformCard('facebook', '#facebookChip', '#facebookReason');
   }
@@ -617,8 +655,8 @@
     // never ready unless the core said so; a missing target is honestly not configured.
     const connection = target ? target.connection : 'not_configured';
     const chip = $(chipSelector);
-    chip.textContent = connection.replace('_', ' ');
-    chip.dataset.level = connection === 'ready' ? 'ok' : connection === 'failed' ? 'bad' : 'off';
+    chip.textContent = connectionLabel(connection);
+    chip.dataset.level = connectionLevel(connection);
     $(reasonSelector).textContent = target && target.reason
       ? target.reason
       : connection === 'ready' ? 'Connection verified by the core.'
@@ -1076,9 +1114,14 @@
     if (!connected) throw new Error('Core is offline — nothing was saved.');
     if (!chatId) throw new Error('Enter the target channel id.');
     // current core's Rust argument is `chat`; chatId stays in the UI contract.
-    await callCore('save_telegram', { token, chatId, chat: chatId });
-    setStatus('Telegram settings saved', 'ok');
+    const result = unwrap(await callCore('save_telegram', { token, chatId, chat: chatId }));
+    const check = result && result.verification ? result.verification : null;
+    // The core asked Telegram itself; repeat its answer, never a guess of our own.
+    if (check && check.ok) setStatus('Telegram connected · ' + (check.summary || 'verified by Telegram'), 'ok');
+    else if (check) setStatus('Telegram saved, not verified — ' + (check.error || 'Telegram gave no answer'), 'info');
+    else setStatus('Telegram settings saved', 'ok');
     await refreshState();
+    return check;
   }
 
   function fieldBlock(labelText, input, helpText) {

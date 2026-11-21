@@ -175,7 +175,7 @@
 
       <section class="view" id="settingsView" aria-label="Settings" hidden>
         <div class="card">
-          <div class="card-head"><h2>This app</h2><span class="hint">Version 0.3.0</span></div>
+          <div class="card-head"><h2>This app</h2><span class="hint" id="settingsVersion">Version 0.3.0</span></div>
           <div class="setting-row">
             <div><label for="dataFolder">Data folder</label><p class="help">Read from the core; Browse… is not wired yet.</p></div>
             <div class="path-field"><input type="text" id="dataFolder" value="Not reported by core" readonly><button class="button subtle" data-browse="data" type="button">Browse…</button></div>
@@ -210,7 +210,7 @@
           <div class="card-head"><h2>About</h2></div>
           <div class="setting-row">
             <img class="about-mark" src="logo.svg" alt="" width="44" height="44">
-            <div><span class="field-label">Wire Studio KH 0.3.0</span><p class="help">Free and unlocked. What's New lists this release's changes.</p></div>
+            <div><span class="field-label" id="aboutVersion">Wire Studio KH 0.3.0</span><p class="help">Free and unlocked. What's New lists this release's changes.</p></div>
             <div class="button-row"><button class="button subtle" id="aboutWhatsNewBtn" type="button">What's New</button><button class="button subtle" id="aboutSupportBtn" type="button">Support</button></div>
           </div>
         </div>

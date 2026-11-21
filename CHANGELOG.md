@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 — 2026-11-21
+
+- The Telegram card stops contradicting itself: it now says **connected** only after Telegram itself confirms the bot and the channel, **saved, not verified** when both are stored but unconfirmed, and shows Telegram's own refusal word for word when the check fails.
+- Saving a token and channel now asks Telegram straight away: who the bot is, and whether it can see that channel. A network miss never loses what you saved — it says "saved, not verified" and why.
+- The version shown in the footer, About and Settings now comes from the app build itself, not a hand-written string, so the footer always names the version you are actually running.
+
 ## 0.3.0 — 2026-11-21
 
 - Two more places to post: a YouTube channel (the video uploads straight to the channel and picks up where it stopped if the connection drops) and a Facebook Page (a text post, or one image that lives at a public web address).

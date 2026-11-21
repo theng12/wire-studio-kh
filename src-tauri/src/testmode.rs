@@ -83,6 +83,14 @@ fn rows(state: &AppState) -> Vec<Value> {
 
 fn state_reply(state: &Shared) -> Value {
     hold::refresh_pause(state);
+    let cfg = crate::settings::load(&crate::settings::path_in(&state.data_dir));
+    let sec = crate::secrets::load(&crate::secrets::path_in(&state.data_dir));
+    let (connection, reason) = crate::settings::telegram_status(
+        !sec.telegram.bot_token.is_empty(),
+        &cfg.telegram_chat,
+        cfg.telegram_verified.as_ref(),
+        &cfg.telegram_verify_error,
+    );
     let rows = rows(state);
     let mut next_due: Option<String> = None;
     for row in &rows {
@@ -96,10 +104,18 @@ fn state_reply(state: &Shared) -> Value {
     }
     json!({
         "ok": true,
+        "version": env!("CARGO_PKG_VERSION"),
         "paused": state.paused.load(std::sync::atomic::Ordering::SeqCst),
         "in_flight": hold::in_flight(state),
         "deliveries": rows,
         "next_due": next_due,
+        "telegram": {
+            "configured": !sec.telegram.bot_token.is_empty() && !cfg.telegram_chat.is_empty(),
+            "token_masked": if sec.telegram.bot_token.is_empty() { String::new() } else { crate::secrets::mask(&sec.telegram.bot_token) },
+            "chat": cfg.telegram_chat,
+            "connection_state": connection,
+            "reason": reason,
+        },
     })
 }
 
@@ -340,6 +356,24 @@ fn save_telegram(state: &AppState, payload: Value) -> (u16, Value) {
     let sp = crate::settings::path_in(&state.data_dir);
     let mut cfg = crate::settings::load(&sp);
     cfg.telegram_chat = chat.clone();
+
+    // Same rule as the windowed path: saved is not connected until Telegram answers.
+    let verification = match crate::adapters::telegram::check_blocking(&sec.telegram.bot_token, &chat) {
+        Ok(check) => {
+            cfg.telegram_verified = Some(crate::settings::TelegramCheck {
+                bot: check.bot.clone(),
+                chat: check.chat.clone(),
+                at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            });
+            cfg.telegram_verify_error.clear();
+            json!({ "ok": true, "summary": format!("{} → {}", check.bot, check.chat) })
+        }
+        Err(error) => {
+            cfg.telegram_verified = None;
+            cfg.telegram_verify_error = error.clone();
+            json!({ "ok": false, "error": error })
+        }
+    };
     if let Err(error) = crate::settings::save(&sp, &cfg) {
         return (400, json!({ "ok": false, "error": format!("cannot save telegram channel: {error}") }));
     }
@@ -350,6 +384,7 @@ fn save_telegram(state: &AppState, payload: Value) -> (u16, Value) {
             "configured": true,
             "chat": chat,
             "token_masked": crate::secrets::mask(&sec.telegram.bot_token),
+            "verification": verification,
         }),
     )
 }

@@ -17,6 +17,28 @@ pub struct TelegramAdapter {
     pub http: reqwest::Client,
 }
 
+/// A verified pair: the bot the token belongs to, and the channel it answered for.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TelegramCheck {
+    pub bot: String,
+    pub chat: String,
+}
+
+/// A bounded, blocking check for the headless route (the windowed app awaits `check`).
+pub fn check_blocking(token: &str, chat_id: &str) -> Result<TelegramCheck, String> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| error.to_string())?;
+    let adapter = TelegramAdapter::new(token.to_string());
+    runtime
+        .block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(10), adapter.check(chat_id)).await
+        })
+        .map_err(|_| "Telegram did not answer within 10 seconds".to_string())?
+        .map_err(|error| error.message)
+}
+
 impl std::fmt::Debug for TelegramAdapter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TelegramAdapter")
@@ -108,6 +130,48 @@ impl TelegramAdapter {
         }
     }
 
+    /// One GET against the Bot API; `ok:false` bodies become the provider's own words.
+    async fn get(&self, method: &str, query: &[(&str, &str)]) -> Result<Value, AdapterError> {
+        let response = self
+            .http
+            .get(self.endpoint(method))
+            .query(query)
+            .send()
+            .await
+            .map_err(|error| AdapterError {
+                kind: ErrorKind::Network,
+                message: self.scrub(&format!("{method}: {error}")),
+                retry_after_seconds: None,
+            })?;
+        let status = response.status();
+        let headers = response.headers().clone();
+        let body = response.text().await.unwrap_or_default();
+        if !status.is_success() {
+            return Err(self.http_error(status, &headers, &body));
+        }
+        let value: Value = serde_json::from_str(&body)
+            .map_err(|_| Self::unknown(self.scrub(&format!("{method}: {}", Self::description(&body)))))?;
+        if value.get("ok").and_then(Value::as_bool) != Some(true) {
+            return Err(Self::unknown(self.scrub(&format!("{method}: {}", Self::description(&body)))));
+        }
+        Ok(value)
+    }
+
+    /// What the connection really is: the bot behind the token, and the channel it can see.
+    pub async fn check(&self, chat_id: &str) -> Result<TelegramCheck, AdapterError> {
+        let me = self.get("getMe", &[]).await?;
+        let username = me
+            .get("result")
+            .and_then(|row| row.get("username"))
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let chat = self.get("getChat", &[("chat_id", chat_id)]).await?;
+        Ok(TelegramCheck {
+            bot: format!("@{username}"),
+            chat: chat_title(chat.get("result"), chat_id),
+        })
+    }
+
     /// Best-effort public link: only public channels and supergroups have one.
     fn message_url(chat_id: &str, message_id: i64) -> Option<String> {
         if let Some(handle) = chat_id.strip_prefix('@') {
@@ -117,6 +181,19 @@ impl TelegramAdapter {
             .strip_prefix("-100")
             .map(|id| format!("https://t.me/c/{id}/{message_id}"))
     }
+}
+
+/// A channel has `title`, a supergroup handle has `username`, a person has `first_name`.
+fn chat_title(result: Option<&Value>, fallback: &str) -> String {
+    result
+        .and_then(|row| {
+            row.get("title")
+                .or_else(|| row.get("username"))
+                .or_else(|| row.get("first_name"))
+        })
+        .and_then(Value::as_str)
+        .unwrap_or(fallback)
+        .to_string()
 }
 
 impl PlatformAdapter for TelegramAdapter {
@@ -290,6 +367,16 @@ mod tests {
                 .kind,
             ErrorKind::PlatformOutage
         );
+    }
+
+    #[test]
+    fn chat_title_prefers_the_real_name() {
+        let json = |raw: &str| serde_json::from_str::<Value>(raw).unwrap();
+        assert_eq!(chat_title(Some(&json(r#"{"title":"Wire Smoke Test"}"#)), "-100"), "Wire Smoke Test");
+        assert_eq!(chat_title(Some(&json(r#"{"username":"wire_smoke"}"#)), "-100"), "wire_smoke");
+        assert_eq!(chat_title(Some(&json(r#"{"first_name":"Sokha"}"#)), "-100"), "Sokha");
+        assert_eq!(chat_title(Some(&json(r#"{}"#)), "-100"), "-100");
+        assert_eq!(chat_title(None, "@c"), "@c");
     }
 
     #[test]

@@ -29,6 +29,14 @@ pub fn state(s: State<'_, Shared>) -> Result<serde_json::Value, String> {
         }
     }
 
+    // Saved is not connected: only a getMe+getChat answer may say "connected".
+    let (connection, reason) = settings::telegram_status(
+        !sec.telegram.bot_token.is_empty(),
+        &cfg.telegram_chat,
+        cfg.telegram_verified.as_ref(),
+        &cfg.telegram_verify_error,
+    );
+
     let presets: Vec<serde_json::Value> = crate::formats::registry()
         .iter()
         .map(|p| {
@@ -54,6 +62,8 @@ pub fn state(s: State<'_, Shared>) -> Result<serde_json::Value, String> {
             "configured": !sec.telegram.bot_token.is_empty() && !cfg.telegram_chat.is_empty(),
             "token_masked": if sec.telegram.bot_token.is_empty() { String::new() } else { secrets::mask(&sec.telegram.bot_token) },
             "chat": cfg.telegram_chat,
+            "connection_state": connection,
+            "reason": reason,
         },
         "appearance": cfg.appearance,
         "data_dir": s.data_dir.display().to_string(),
@@ -115,7 +125,7 @@ pub fn retry_delivery(s: State<'_, Shared>, id: String) -> Result<serde_json::Va
 }
 
 #[tauri::command]
-pub fn save_telegram(
+pub async fn save_telegram(
     s: State<'_, Shared>,
     token: String,
     chat: String,
@@ -137,12 +147,38 @@ pub fn save_telegram(
     let sp = settings::path_in(&s.data_dir);
     let mut cfg = settings::load(&sp);
     cfg.telegram_chat = chat.clone();
+
+    // Saving proves nothing, so ask Telegram now: who is the token, can it see the channel.
+    let adapter = crate::adapters::telegram::TelegramAdapter::new(sec.telegram.bot_token.clone());
+    let answer = tokio::time::timeout(std::time::Duration::from_secs(10), adapter.check(&chat)).await;
+    let verification = match answer {
+        Ok(Ok(check)) => {
+            cfg.telegram_verified = Some(settings::TelegramCheck {
+                bot: check.bot.clone(),
+                chat: check.chat.clone(),
+                at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            });
+            cfg.telegram_verify_error.clear();
+            serde_json::json!({ "ok": true, "summary": format!("{} → {}", check.bot, check.chat) })
+        }
+        Ok(Err(error)) => {
+            cfg.telegram_verified = None;
+            cfg.telegram_verify_error = error.message.clone();
+            serde_json::json!({ "ok": false, "error": error.message })
+        }
+        Err(_) => {
+            cfg.telegram_verified = None;
+            cfg.telegram_verify_error = "Telegram did not answer within 10 seconds".into();
+            serde_json::json!({ "ok": false, "error": cfg.telegram_verify_error })
+        }
+    };
     settings::save(&sp, &cfg)?;
 
     Ok(serde_json::json!({
         "configured": true,
         "token_masked": secrets::mask(&sec.telegram.bot_token),
         "chat": chat,
+        "verification": verification,
     }))
 }
 

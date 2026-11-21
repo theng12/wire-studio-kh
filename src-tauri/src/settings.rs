@@ -6,6 +6,14 @@ use serde::{Deserialize, Serialize};
 
 pub const SETTINGS_FILE: &str = "settings.json";
 
+/// The last answer Telegram itself gave for the saved token and channel.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TelegramCheck {
+    pub bot: String,
+    pub chat: String,
+    pub at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -14,6 +22,10 @@ pub struct Settings {
     pub telegram_chat: String,
     /// system | light | dark
     pub appearance: String,
+    /// Set only when Telegram answered getMe and getChat for this token and channel.
+    pub telegram_verified: Option<TelegramCheck>,
+    /// The provider's own words when the last check failed; cleared on success.
+    pub telegram_verify_error: String,
 }
 
 impl Default for Settings {
@@ -22,7 +34,32 @@ impl Default for Settings {
             schema_version: 1,
             telegram_chat: String::new(),
             appearance: "system".into(),
+            telegram_verified: None,
+            telegram_verify_error: String::new(),
         }
+    }
+}
+
+/// What the card shows: "configured" means saved and never checked, never "connected".
+pub fn telegram_status(
+    has_token: bool,
+    chat: &str,
+    verified: Option<&TelegramCheck>,
+    verify_error: &str,
+) -> (String, String) {
+    if !has_token || chat.is_empty() {
+        return ("not_configured".into(), String::new());
+    }
+    match verified {
+        Some(check) => (
+            "ready".into(),
+            format!("connected · {} → {}", check.bot, check.chat),
+        ),
+        None if !verify_error.is_empty() => ("failed".into(), verify_error.to_string()),
+        None => (
+            "configured".into(),
+            "Saved, not verified yet. Replace the token to check the bot and channel.".into(),
+        ),
     }
 }
 
@@ -58,6 +95,24 @@ mod tests {
         s.telegram_chat = "@wire_smoke_test".into();
         save(&p, &s).unwrap();
         assert_eq!(load(&p).telegram_chat, "@wire_smoke_test");
+        assert_eq!(load(&p).telegram_verified, None);
         let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn telegram_status_never_calls_saved_connected() {
+        let saved = Settings::default();
+        assert_eq!(telegram_status(false, "", None, "").0, "not_configured");
+        assert_eq!(telegram_status(true, "@c", None, "").0, "configured");
+        assert_eq!(telegram_status(true, "@c", None, "Unauthorized").0, "failed");
+        let check = TelegramCheck {
+            bot: "@wire_studio_kh_bot".into(),
+            chat: "Wire Smoke Test".into(),
+            at: "2026-11-21T15:00:00Z".into(),
+        };
+        let (state, reason) = telegram_status(true, "-1004483436341", Some(&check), "");
+        assert_eq!(state, "ready");
+        assert_eq!(reason, "connected · @wire_studio_kh_bot → Wire Smoke Test");
+        assert_eq!(saved.telegram_verify_error, "");
     }
 }
