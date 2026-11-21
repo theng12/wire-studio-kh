@@ -168,6 +168,24 @@ button { cursor: pointer; }
 .counter { margin: var(--sp-2) 0 0; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .reason { margin: 0 0 var(--sp-4); color: var(--muted); }
 
+/* How to connect: one collapsed line; the current step is the one marked. */
+.howto { margin: 0 0 var(--sp-4); border: 1px solid var(--line); border-radius: var(--r-card); background: var(--panel-2); }
+.howto summary { padding: 10px var(--sp-3); cursor: pointer; font-size: 13px; font-weight: 600; list-style: none; }
+.howto summary::-webkit-details-marker { display: none; }
+.howto summary::after { content: "+"; float: right; color: var(--muted); font-weight: 400; }
+.howto[open] summary::after { content: "–"; }
+.howto-steps { margin: 0; padding: 0 var(--sp-3) var(--sp-3) 34px; display: grid; gap: 6px; color: var(--muted); font-size: 13px; }
+.howto-steps li { padding-left: 4px; }
+.howto-steps li.is-current { color: var(--ink); font-weight: 600; }
+.howto-steps li.is-done { color: var(--muted); text-decoration: line-through; }
+.howto-steps code { font-size: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+
+/* Channels the bot can see: a title, its kind, one action. */
+.chat-list { list-style: none; margin: var(--sp-2) 0 0; padding: 0; display: grid; gap: var(--sp-2); }
+.chat-row { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-control); background: var(--panel); }
+.chat-row strong { display: block; font-size: 13px; }
+.chat-kind { font-size: 11px; color: var(--muted); }
+
 /* Fields */
 .field { margin: 0 0 var(--sp-4); padding: 0; border: 0; min-width: 0; }
 .field.compact { margin: 0; }

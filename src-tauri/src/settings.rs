@@ -20,6 +20,8 @@ pub struct Settings {
     pub schema_version: u32,
     /// The Telegram channel this Mac posts to, e.g. "@wire_smoke_test" or "-100…".
     pub telegram_chat: String,
+    /// Telegram's own name for that channel, shown beside the saved destination.
+    pub telegram_chat_title: String,
     /// system | light | dark
     pub appearance: String,
     /// Set only when Telegram answered getMe and getChat for this token and channel.
@@ -33,6 +35,7 @@ impl Default for Settings {
         Self {
             schema_version: 1,
             telegram_chat: String::new(),
+            telegram_chat_title: String::new(),
             appearance: "system".into(),
             telegram_verified: None,
             telegram_verify_error: String::new(),
@@ -44,6 +47,7 @@ impl Default for Settings {
 pub fn telegram_status(
     has_token: bool,
     chat: &str,
+    chat_title: &str,
     verified: Option<&TelegramCheck>,
     verify_error: &str,
 ) -> (String, String) {
@@ -51,10 +55,17 @@ pub fn telegram_status(
         return ("not_configured".into(), String::new());
     }
     match verified {
-        Some(check) => (
-            "ready".into(),
-            format!("connected · {} → {}", check.bot, check.chat),
-        ),
+        Some(check) => {
+            let title = if chat_title.trim().is_empty() {
+                check.chat.as_str()
+            } else {
+                chat_title.trim()
+            };
+            (
+                "ready".into(),
+                format!("connected · {} → {}", check.bot, title),
+            )
+        }
         None if !verify_error.is_empty() => ("failed".into(), verify_error.to_string()),
         None => (
             "configured".into(),
@@ -102,17 +113,25 @@ mod tests {
     #[test]
     fn telegram_status_never_calls_saved_connected() {
         let saved = Settings::default();
-        assert_eq!(telegram_status(false, "", None, "").0, "not_configured");
-        assert_eq!(telegram_status(true, "@c", None, "").0, "configured");
-        assert_eq!(telegram_status(true, "@c", None, "Unauthorized").0, "failed");
+        assert_eq!(telegram_status(false, "", "", None, "").0, "not_configured");
+        assert_eq!(telegram_status(true, "@c", "", None, "").0, "configured");
+        assert_eq!(telegram_status(true, "@c", "", None, "Unauthorized").0, "failed");
         let check = TelegramCheck {
             bot: "@wire_studio_kh_bot".into(),
             chat: "Wire Smoke Test".into(),
             at: "2026-11-21T15:00:00Z".into(),
         };
-        let (state, reason) = telegram_status(true, "-1004483436341", Some(&check), "");
+        let (state, reason) = telegram_status(true, "-1004483436341", "", Some(&check), "");
         assert_eq!(state, "ready");
         assert_eq!(reason, "connected · @wire_studio_kh_bot → Wire Smoke Test");
+        let (_, reason) = telegram_status(
+            true,
+            "-1004483436341",
+            "Saved Channel Name",
+            Some(&check),
+            "",
+        );
+        assert_eq!(reason, "connected · @wire_studio_kh_bot → Saved Channel Name");
         assert_eq!(saved.telegram_verify_error, "");
     }
 }

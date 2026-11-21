@@ -24,6 +24,17 @@ pub struct TelegramCheck {
     pub chat: String,
 }
 
+/// A channel the bot can see, in the words Telegram gave for it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DiscoveredChat {
+    pub id: String,
+    pub title: String,
+    pub kind: String,
+}
+
+const BLOCKING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const INVITE_REASON: &str = "Invite links only work once the bot is in the channel — add the bot, post a message, then press Find my channel.";
+
 /// A bounded, blocking check for the headless route (the windowed app awaits `check`).
 pub fn check_blocking(token: &str, chat_id: &str) -> Result<TelegramCheck, String> {
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -33,8 +44,45 @@ pub fn check_blocking(token: &str, chat_id: &str) -> Result<TelegramCheck, Strin
     let adapter = TelegramAdapter::new(token.to_string());
     runtime
         .block_on(async {
-            tokio::time::timeout(std::time::Duration::from_secs(10), adapter.check(chat_id)).await
+            tokio::time::timeout(BLOCKING_TIMEOUT, adapter.check(chat_id)).await
         })
+        .map_err(|_| "Telegram did not answer within 10 seconds".to_string())?
+        .map_err(|error| error.message)
+}
+
+/// Bounded headless forms of the connect flow's three reads.
+pub fn connected_as_blocking(token: &str) -> Result<String, String> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| error.to_string())?;
+    let adapter = TelegramAdapter::new(token.to_string());
+    runtime
+        .block_on(async { tokio::time::timeout(BLOCKING_TIMEOUT, adapter.connected_as()).await })
+        .map_err(|_| "Telegram did not answer within 10 seconds".to_string())?
+        .map_err(|error| error.message)
+}
+
+pub fn discover_blocking(token: &str) -> Result<Vec<DiscoveredChat>, String> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| error.to_string())?;
+    let adapter = TelegramAdapter::new(token.to_string());
+    runtime
+        .block_on(async { tokio::time::timeout(BLOCKING_TIMEOUT, adapter.discover()).await })
+        .map_err(|_| "Telegram did not answer within 10 seconds".to_string())?
+        .map_err(|error| error.message)
+}
+
+pub fn resolve_blocking(token: &str, text: &str) -> Result<DiscoveredChat, String> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| error.to_string())?;
+    let adapter = TelegramAdapter::new(token.to_string());
+    runtime
+        .block_on(async { tokio::time::timeout(BLOCKING_TIMEOUT, adapter.resolve(text)).await })
         .map_err(|_| "Telegram did not answer within 10 seconds".to_string())?
         .map_err(|error| error.message)
 }
@@ -157,18 +205,52 @@ impl TelegramAdapter {
         Ok(value)
     }
 
-    /// What the connection really is: the bot behind the token, and the channel it can see.
-    pub async fn check(&self, chat_id: &str) -> Result<TelegramCheck, AdapterError> {
+    /// Who the token belongs to, without needing a channel.
+    pub async fn connected_as(&self) -> Result<String, AdapterError> {
         let me = self.get("getMe", &[]).await?;
         let username = me
             .get("result")
             .and_then(|row| row.get("username"))
             .and_then(Value::as_str)
             .unwrap_or("unknown");
+        Ok(format!("@{username}"))
+    }
+
+    /// What the connection really is: the bot behind the token, and the channel it can see.
+    pub async fn check(&self, chat_id: &str) -> Result<TelegramCheck, AdapterError> {
+        let bot = self.connected_as().await?;
         let chat = self.get("getChat", &[("chat_id", chat_id)]).await?;
         Ok(TelegramCheck {
-            bot: format!("@{username}"),
+            bot,
             chat: chat_title(chat.get("result"), chat_id),
+        })
+    }
+
+    /// Channels and groups the bot can see. No updates is a normal, empty answer.
+    pub async fn discover(&self) -> Result<Vec<DiscoveredChat>, AdapterError> {
+        let updates = self
+            .get(
+                "getUpdates",
+                &[
+                    ("limit", "100"),
+                    ("timeout", "0"),
+                    ("allowed_updates", r#"["message","channel_post"]"#),
+                ],
+            )
+            .await?;
+        Ok(discovered_from_updates(updates.get("result")))
+    }
+
+    /// Turn a pasted name, t.me link or numeric id into Telegram's own channel details.
+    pub async fn resolve(&self, raw: &str) -> Result<DiscoveredChat, AdapterError> {
+        let reference = chat_reference(raw).map_err(|message| AdapterError {
+            kind: ErrorKind::ContentInvalid,
+            message,
+            retry_after_seconds: None,
+        })?;
+        let answer = self.get("getChat", &[("chat_id", reference.as_str())]).await?;
+        discovered_chat(answer.get("result")).ok_or_else(|| {
+            Self::unknown(self.scrub("Telegram did not return the channel details."))
         })
     }
 
@@ -194,6 +276,66 @@ fn chat_title(result: Option<&Value>, fallback: &str) -> String {
         .and_then(Value::as_str)
         .unwrap_or(fallback)
         .to_string()
+}
+
+/// Bot API needs @name or a numeric id, never a bare t.me link or an invite link.
+fn chat_reference(raw: &str) -> Result<String, String> {
+    let raw = raw.trim().trim_end_matches('/');
+    let path = if let Some((_, rest)) = raw.split_once("://") {
+        let (host, path) = rest.split_once('/').ok_or("Use a t.me channel link.")?;
+        if !host.eq_ignore_ascii_case("t.me") && !host.eq_ignore_ascii_case("www.t.me") {
+            return Err("Use a t.me channel link.".into());
+        }
+        path
+    } else {
+        raw.strip_prefix("t.me/").unwrap_or(raw)
+    };
+    let handle = path.split(['?', '#']).next().unwrap_or("").trim();
+    if handle.is_empty() {
+        return Err("Add a channel name, t.me link or Telegram id.".into());
+    }
+    if handle.starts_with('+') {
+        return Err(INVITE_REASON.into());
+    }
+    if handle.contains('/') {
+        return Err("Open the channel from Find my channel; a post link cannot be added.".into());
+    }
+    if handle.parse::<i64>().is_ok() {
+        return Ok(handle.to_string());
+    }
+    Ok(format!("@{}", handle.strip_prefix('@').unwrap_or(handle)))
+}
+
+fn discovered_chat(chat: Option<&Value>) -> Option<DiscoveredChat> {
+    let row = chat?;
+    let id = row
+        .get("id")
+        .and_then(Value::as_i64)
+        .map(|id| id.to_string())
+        .or_else(|| row.get("id").and_then(Value::as_str).map(str::to_string))?;
+    let title = chat_title(Some(row), &id);
+    Some(DiscoveredChat {
+        id,
+        title,
+        kind: row.get("type").and_then(Value::as_str).unwrap_or("").into(),
+    })
+}
+
+fn discovered_from_updates(updates: Option<&Value>) -> Vec<DiscoveredChat> {
+    let mut chats: Vec<DiscoveredChat> = Vec::new();
+    for update in updates.and_then(Value::as_array).into_iter().flatten() {
+        let chat = update
+            .get("message")
+            .or_else(|| update.get("channel_post"))
+            .and_then(|row| row.get("chat"));
+        if let Some(found) = discovered_chat(chat) {
+            // getUpdates can repeat a chat; keep the first sighting and its order.
+            if !chats.iter().any(|known| known.id == found.id) {
+                chats.push(found);
+            }
+        }
+    }
+    chats
 }
 
 impl PlatformAdapter for TelegramAdapter {
@@ -276,7 +418,7 @@ impl PlatformAdapter for TelegramAdapter {
             if payload.target.trim().is_empty() {
                 return Err(AdapterError {
                     kind: ErrorKind::ContentInvalid,
-                    message: "no chat_id target".into(),
+                    message: "Pick a channel first.".into(),
                     retry_after_seconds: None,
                 });
             }
@@ -377,6 +519,49 @@ mod tests {
         assert_eq!(chat_title(Some(&json(r#"{"first_name":"Sokha"}"#)), "-100"), "Sokha");
         assert_eq!(chat_title(Some(&json(r#"{}"#)), "-100"), "-100");
         assert_eq!(chat_title(None, "@c"), "@c");
+    }
+
+    #[test]
+    fn chat_reference_accepts_names_links_and_numeric_ids() {
+        assert_eq!(chat_reference("@news"), Ok("@news".into()));
+        assert_eq!(chat_reference(" https://t.me/news "), Ok("@news".into()));
+        assert_eq!(chat_reference("t.me/news/"), Ok("@news".into()));
+        assert_eq!(chat_reference("http://www.t.me/news"), Ok("@news".into()));
+        assert_eq!(chat_reference("-1004483436341"), Ok("-1004483436341".into()));
+        assert_eq!(chat_reference("42"), Ok("42".into()));
+    }
+
+    #[test]
+    fn chat_reference_refuses_invites_and_post_links() {
+        let invite = chat_reference("t.me/+abc").unwrap_err();
+        assert_eq!(invite, INVITE_REASON);
+        assert_eq!(chat_reference("https://t.me/+abc").unwrap_err(), INVITE_REASON);
+        assert!(chat_reference("https://t.me/news/42").unwrap_err().contains("post link"));
+        assert!(chat_reference("https://example.com/news").unwrap_err().contains("t.me"));
+        assert!(chat_reference("").unwrap_err().contains("channel"));
+    }
+
+    #[test]
+    fn discovered_chats_keep_first_sighting_and_telegram_words() {
+        let updates: Value = serde_json::from_str(
+            r#"[
+                {"update_id":1,"message":{"chat":{"id":-1001,"type":"channel","title":"Wire News"}}},
+                {"update_id":2,"channel_post":{"chat":{"id":-1001,"type":"channel","title":"Wire News"}}},
+                {"update_id":3,"message":{"chat":{"id":42,"type":"private","first_name":"Sokha"}}},
+                {"update_id":4,"message":{"text":"no chat here"}},
+                {"update_id":5,"channel_post":{"chat":{"id":-1002,"type":"supergroup","username":"wire_group"}}}
+            ]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            discovered_from_updates(Some(&updates)),
+            vec![
+                DiscoveredChat { id: "-1001".into(), title: "Wire News".into(), kind: "channel".into() },
+                DiscoveredChat { id: "42".into(), title: "Sokha".into(), kind: "private".into() },
+                DiscoveredChat { id: "-1002".into(), title: "wire_group".into(), kind: "supergroup".into() },
+            ]
+        );
+        assert!(discovered_from_updates(None).is_empty());
     }
 
     #[test]

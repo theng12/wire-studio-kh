@@ -117,24 +117,48 @@
         <div class="card">
           <div class="card-head"><h2>Telegram</h2><span class="chip" id="telegramChip">not configured</span></div>
           <p class="reason" id="telegramReason">No connection state reported by the core yet.</p>
+
+          <details class="howto" id="telegramHowto">
+            <summary id="telegramHowtoSummary">How to connect Telegram — 1 of 4</summary>
+            <ol class="howto-steps" id="telegramHowtoSteps">
+              <li data-step="1">Open Telegram, search <strong>@BotFather</strong>, send <code>/newbot</code>, and copy the bot token it gives you.</li>
+              <li data-step="2">Paste the bot token below and press <strong>Connect</strong>.</li>
+              <li data-step="3">Add <strong id="howtoBotName">your bot</strong> as an administrator of your channel.</li>
+              <li data-step="4">Post any message in the channel, then press <strong>Find my channel</strong>.</li>
+            </ol>
+          </details>
+
           <div class="target-grid">
             <div class="field">
-              <span class="field-label" id="tokenLabel">Bot token</span>
-              <div class="readonly-value" id="telegramToken">No token saved</div>
-              <p class="help" id="tokenHelp">Only the last four characters can be shown; the full token stays in the core's secrets file.</p>
+              <label for="telegramTokenInput">Bot token</label>
+              <input type="password" id="telegramTokenInput" placeholder="Paste the token from @BotFather" autocomplete="off" spellcheck="false">
+              <p class="help" id="telegramTokenHelp">No token saved yet.</p>
+              <div class="actions"><button class="button" id="telegramConnectBtn" type="button">Connect</button></div>
             </div>
             <div class="field">
-              <label for="telegramChatId">Channel id</label>
-              <input type="text" id="telegramChatId" placeholder="-100…" autocomplete="off">
-              <p class="help">Bot must be an admin of this channel before delivery can succeed.</p>
+              <label for="telegramChannel">Channel</label>
+              <input type="text" id="telegramChannel" placeholder="@my_channel, t.me/my_channel or -100…" autocomplete="off" spellcheck="false">
+              <p class="help" id="telegramChannelHelp">No channel chosen yet.</p>
+              <div class="actions">
+                <button class="button subtle" id="telegramFindBtn" type="button">Find my channel</button>
+                <button class="button" id="telegramUseBtn" type="button">Use this channel</button>
+              </div>
+              <p class="help" id="telegramFindHelp" hidden></p>
+              <ul class="chat-list" id="telegramChatList" hidden></ul>
             </div>
           </div>
-          <div class="actions"><button class="button" id="telegramManageBtn" type="button">Add token</button><button class="button subtle" id="telegramSaveChatBtn" type="button">Save channel</button></div>
         </div>
         <div class="card">
           <div class="card-head"><h2>YouTube</h2><span class="chip" id="youtubeChip">not configured</span></div>
           <p class="reason" id="youtubeReason">No connection state reported by the core yet.</p>
-          <p class="help">Google Cloud OAuth client, then connect the channel</p>
+          <details class="howto" id="youtubeHowto">
+            <summary>How to connect YouTube</summary>
+            <ol class="howto-steps">
+              <li>Create a Google Cloud project and turn on YouTube Data API v3.</li>
+              <li>Create an OAuth client of type Desktop and download its JSON.</li>
+              <li>Press Connect and sign in with the Google account that owns the channel.</li>
+            </ol>
+          </details>
           <div class="actions">
             <span title="arrives when the YouTube connection ships"><button class="button" id="youtubeConnectBtn" type="button" title="arrives when the YouTube connection ships" disabled>Connect</button></span>
             <span class="hint">Connection shipping in a later build.</span>
@@ -143,7 +167,14 @@
         <div class="card">
           <div class="card-head"><h2>Facebook Page</h2><span class="chip" id="facebookChip">not configured</span></div>
           <p class="reason" id="facebookReason">No connection state reported by the core yet.</p>
-          <p class="help">Meta app with pages_manage_posts</p>
+          <details class="howto" id="facebookHowto">
+            <summary>How to connect a Facebook Page</summary>
+            <ol class="howto-steps">
+              <li>Create a Meta app and add the Facebook Login product.</li>
+              <li>Request the pages_manage_posts permission for the Page you post to.</li>
+              <li>Press Connect, sign in, and pick the Page.</li>
+            </ol>
+          </details>
           <div class="actions">
             <span title="arrives when the Facebook connection ships"><button class="button" id="facebookConnectBtn" type="button" title="arrives when the Facebook connection ships" disabled>Connect</button></span>
             <span class="hint">Connection shipping in a later build.</span>

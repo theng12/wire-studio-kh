@@ -2,12 +2,13 @@
 
 (() => {
   // Fallback only: the core reports the real version and applyVersion() uses it.
-  let APP_VERSION = '0.3.1';
+  let APP_VERSION = '0.4.0';
   const WHATS_NEW = [
-    'The Telegram card now tells one truth: connected only when Telegram confirms the bot and channel, "saved, not verified" when both are stored but unconfirmed, and Telegram\'s own words when the check fails.',
-    'Saving a token and channel checks them with Telegram straight away — who the bot is, and whether it can see that channel.',
-    'The version in the footer, About and Settings comes from the build itself now, so it always matches the app you are running.',
-    'Still here from 0.3.0: YouTube upload, Facebook Pages, named format sizes and one post to many places at once.'
+    'Connecting Telegram is now a screen, not a browser trick: paste the bot token and press Connect, then press Find my channel and pick your channel by name.',
+    'You can paste what you already have — @username, a t.me link or the number — and the app checks it with Telegram and shows the channel title back before anything is saved.',
+    'Once a channel is connected the app says "Sending to <channel name>" everywhere, and the Telegram card shows "connected · @your_bot → <channel>".',
+    'Every platform card carries a short "How to connect" block that opens with the one step you are on, and disappears once you are connected.',
+    'Telegram never asks for a channel id again.'
   ];
   const SUPPORT_URL = 'https://nowpayments.io/donation/studiokh';
   const TEST_ROUTES = {
@@ -15,7 +16,10 @@
     queue_post: ['POST', '/api/test/trigger/schedule'],
     cancel_delivery: ['POST', '/api/test/trigger/cancel'],
     retry_delivery: ['POST', '/api/test/trigger/retry'],
-    save_telegram: ['POST', '/api/test/trigger/save-telegram']
+    save_telegram: ['POST', '/api/test/trigger/save-telegram'],
+    telegram_connected_as: ['POST', '/api/test/trigger/telegram-connected-as'],
+    telegram_discover: ['POST', '/api/test/trigger/telegram-discover'],
+    telegram_use_channel: ['POST', '/api/test/trigger/telegram-use-channel']
   };
   const SECTIONS = {
     composer: { eyebrow: 'Compose', title: 'Composer', subtitle: 'Write a text post, choose where it goes, and send it now or later.' },
@@ -290,15 +294,22 @@
       configured,
       connection: normalizeConnection(telegramRaw.connection_state || telegramRaw.connectionState || telegramRaw.state),
       chatId: String(telegramRaw.chat || telegramRaw.chat_id || telegramRaw.chatId || ''),
+      chatTitle: String(telegramRaw.chat_title || telegramRaw.chatTitle || ''),
+      bot: String(telegramRaw.bot || ''),
       last4: lastFour(telegramRaw.token_masked || telegramRaw.token_last4 || telegramRaw.tokenLast4 || telegramRaw.masked_token || telegramRaw.maskedToken || telegramRaw.mask),
       reason: String(telegramRaw.reason || telegramRaw.error || (configured ? 'Token and channel saved; this build has not reported a verified connection.' : ''))
     };
     // A bare "telegram:<chat>" target carries no state of its own; the telegram
     // block's verdict is the same channel, so the composer must not say otherwise.
-    const targets = targetsRaw.map(normalizeTarget).map(target =>
-      target.platform === 'telegram' && target.connection === 'not_configured' && telegram.connection !== 'not_configured'
-        ? { ...target, connection: telegram.connection, reason: telegram.reason }
-        : target);
+    // Its name is the channel's title, so the composer reads "Sending to <title>".
+    const telegramName = telegram.chatTitle || telegram.chatId;
+    const targets = targetsRaw.map(normalizeTarget).map(target => {
+      if (target.platform !== 'telegram') return target;
+      const named = telegramName ? { ...target, label: 'Telegram — ' + telegramName } : target;
+      return named.connection === 'not_configured' && telegram.connection !== 'not_configured'
+        ? { ...named, connection: telegram.connection, reason: telegram.reason }
+        : named;
+    });
     return {
       version: String(source.version || ''),
       dataDir: String(source.data_dir || source.dataDir || ''),
@@ -630,6 +641,12 @@
   }
 
   function renderTargets() {
+    renderTelegramCard();
+    renderPlatformCard('youtube', '#youtubeChip', '#youtubeReason');
+    renderPlatformCard('facebook', '#facebookChip', '#facebookReason');
+  }
+
+  function renderTelegramCard() {
     const telegram = state.telegram;
     const chip = $('#telegramChip');
     chip.textContent = connectionLabel(telegram.connection);
@@ -637,17 +654,38 @@
     $('#telegramReason').textContent = telegram.reason ||
       (telegram.connection === 'ready' ? 'Connection verified by the core.'
         : telegram.connection === 'failed' ? 'Connection failed; no reason reported by the core.'
-          : telegram.connection === 'configured' ? 'Token and channel saved; replace the token to check them with Telegram.'
-            : 'No verified connection reported. Add a token and channel id to connect.');
-    $('#telegramToken').textContent = telegram.last4
-      ? 'Saved token •••• ' + telegram.last4
-      : telegram.configured ? 'Saved token (last four not reported)' : 'No token saved';
-    $('#telegramManageBtn').textContent = telegram.configured ? 'Replace token' : 'Add token';
-    const chatInput = $('#telegramChatId');
-    if (document.activeElement !== chatInput) chatInput.value = telegram.chatId;
+          : telegram.connection === 'configured' ? 'Token and channel saved; check the connection to confirm them.'
+            : 'No connection yet. Paste the bot token below and press Connect.');
+
+    $('#telegramTokenHelp').textContent = telegram.last4
+      ? 'Saved token •••• ' + telegram.last4 + '. Paste a new token only to replace it.'
+      : telegram.configured ? 'A token is saved. Paste a new token only to replace it.'
+        : 'No token saved yet. Paste the token @BotFather gave you.';
+    $('#telegramConnectBtn').textContent = telegram.configured ? 'Check connection' : 'Connect';
+
+    // The channel is named the way Telegram names it, never only as a number.
+    $('#telegramChannelHelp').textContent = telegram.chatTitle
+      ? 'Sending to ' + telegram.chatTitle + '. Paste another @username, t.me link or id to change it.'
+      : telegram.chatId
+        ? 'Saved channel ' + telegram.chatId + ' — no title reported yet. Press Use this channel to check it.'
+        : 'No channel chosen yet. Find it below, or paste @username, a t.me link or an id.';
+
+    // The block shows the one step the user is on, and disappears once connected.
+    const step = !telegram.configured ? 1 : telegram.connection === 'ready' ? 0 : 3;
+    const howto = $('#telegramHowto');
+    howto.hidden = step === 0;
+    if (step !== 0) {
+      $('#telegramHowtoSummary').textContent = step === 1
+        ? 'How to connect Telegram — 1 of 4'
+        : 'How to connect Telegram — 3 of 4: add the bot as an administrator';
+      $$('#telegramHowtoSteps li').forEach(item => {
+        const number = Number(item.dataset.step);
+        item.classList.toggle('is-current', number === step);
+        item.classList.toggle('is-done', number < step);
+      });
+    }
+    $('#howtoBotName').textContent = telegram.bot || 'your bot';
     $('#settingsTelegramHelp').textContent = 'Telegram is ' + connectionLabel(telegram.connection) + '. Manage the target here.';
-    renderPlatformCard('youtube', '#youtubeChip', '#youtubeReason');
-    renderPlatformCard('facebook', '#facebookChip', '#facebookReason');
   }
 
   function renderPlatformCard(platform, chipSelector, reasonSelector) {
@@ -1110,51 +1148,102 @@
     });
   }
 
-  async function saveTelegram(token, chatId) {
-    if (!connected) throw new Error('Core is offline — nothing was saved.');
-    if (!chatId) throw new Error('Enter the target channel id.');
-    // current core's Rust argument is `chat`; chatId stays in the UI contract.
-    const result = unwrap(await callCore('save_telegram', { token, chatId, chat: chatId }));
-    const check = result && result.verification ? result.verification : null;
-    // The core asked Telegram itself; repeat its answer, never a guess of our own.
-    if (check && check.ok) setStatus('Telegram connected · ' + (check.summary || 'verified by Telegram'), 'ok');
-    else if (check) setStatus('Telegram saved, not verified — ' + (check.error || 'Telegram gave no answer'), 'info');
-    else setStatus('Telegram settings saved', 'ok');
-    await refreshState();
-    return check;
-  }
-
   function fieldBlock(labelText, input, helpText) {
     return el('div', { class: 'field' },
       el('label', { for: input.id, text: labelText }), input, el('p', { class: 'help', text: helpText }));
   }
 
-  function openTokenDialog() {
-    const tokenInput = el('input', {
-      type: 'password', id: 'wire-token', autocomplete: 'off', spellcheck: 'false',
-      placeholder: 'Paste bot token from @BotFather'
+  function chatKind(kind) {
+    return ({ channel: 'Channel', group: 'Group', supergroup: 'Group', private: 'Private chat' })[kind] || 'Chat';
+  }
+
+  // Connect: the token is checked by Telegram itself before anything is saved as "connected".
+  async function telegramConnect() {
+    if (!connected) { setStatus('Core is offline — nothing was saved', 'bad'); return null; }
+    const input = $('#telegramTokenInput');
+    const token = input.value.trim();
+    if (!token && !state.telegram.configured) {
+      setStatus('Paste the bot token from @BotFather first', 'bad');
+      return null;
+    }
+    setStatus('Checking the token with Telegram…', 'info');
+    let result;
+    try {
+      result = unwrap(await callCore('telegram_connected_as', { token }));
+    } catch (error) {
+      setStatus('Not connected — ' + message(error), 'bad');
+      return null;
+    }
+    if (result && result.ok) input.value = '';
+    // Say the answer after the state refresh, or the refresh's own line replaces it.
+    await refreshState();
+    if (result && result.ok) setStatus('Connected as ' + (result.bot || 'your bot'), 'ok');
+    else setStatus('Not connected — ' + (result && result.error ? result.error : 'Telegram gave no answer'), 'bad');
+    return result;
+  }
+
+  // Discover: every channel the bot can see, by name; an empty answer says what to do.
+  async function telegramFind() {
+    if (!connected) { setStatus('Core is offline — nothing was read', 'bad'); return; }
+    const list = $('#telegramChatList');
+    const help = $('#telegramFindHelp');
+    setStatus('Asking Telegram which channels the bot can see…', 'info');
+    let result;
+    try {
+      result = unwrap(await callCore('telegram_discover'));
+    } catch (error) {
+      help.hidden = false;
+      help.textContent = 'Could not ask Telegram — ' + message(error);
+      return;
+    }
+    const chats = result && Array.isArray(result.chats) ? result.chats : [];
+    list.replaceChildren();
+    list.hidden = false;
+    if (!chats.length) {
+      help.hidden = false;
+      help.textContent = 'Nothing yet. Add ' + (state.telegram.bot || 'your bot') +
+        ' as an administrator of your channel, post any message in it, then press Check again.';
+      list.append(el('li', { class: 'chat-row' },
+        el('button', { class: 'button subtle', type: 'button', text: 'Check again', on: { click: telegramFind } })));
+      setStatus('No channel found yet', 'info');
+      return;
+    }
+    help.hidden = true;
+    chats.forEach(chat => {
+      list.append(el('li', { class: 'chat-row' },
+        el('div', {},
+          el('strong', { text: chat.title || chat.id }),
+          el('span', { class: 'chat-kind', text: chatKind(chat.kind) })),
+        el('button', {
+          class: 'button subtle', type: 'button', text: 'Use this channel',
+          on: { click: () => telegramUse(chat.id) }
+        })));
     });
-    const chatInput = el('input', {
-      type: 'text', id: 'wire-chat', autocomplete: 'off', value: state.telegram.chatId, placeholder: '-100…'
-    });
-    const saved = state.telegram.last4
-      ? 'A token is saved (last four: ' + state.telegram.last4 + '). Leave blank to keep it.'
-      : state.telegram.configured ? 'A token is saved. Leave blank to keep it.' : 'The full token is never shown again after saving.';
-    const body = el('div', {},
-      fieldBlock('Bot token', tokenInput, saved),
-      fieldBlock('Channel id', chatInput, 'The bot must be an admin of this channel before it can post.')
-    );
-    openDialog({
-      title: state.telegram.configured ? 'Replace Telegram token' : 'Add Telegram token',
-      body, confirmLabel: 'Save', cancelLabel: 'Cancel', initialFocus: '#wire-token',
-      onConfirm: async panel => {
-        const token = tokenInput.value.trim();
-        const chatId = chatInput.value.trim();
-        if (!chatId) { dialogError(panel, 'Enter the target channel id.'); return false; }
-        if (!token && !state.telegram.configured) { dialogError(panel, 'Paste the bot token from @BotFather.'); return false; }
-        await saveTelegram(token, chatId);
-      }
-    });
+    setStatus(chats.length + ' channel' + (chats.length === 1 ? '' : 's') + ' found', 'ok');
+  }
+
+  // Use a channel by @username, t.me link or id; the title Telegram gives back is saved with it.
+  async function telegramUse(reference) {
+    if (!connected) { setStatus('Core is offline — nothing was saved', 'bad'); return null; }
+    const text = String(reference || $('#telegramChannel').value || '').trim();
+    if (!text) { setStatus('Choose a channel from the list or paste one first', 'bad'); return null; }
+    setStatus('Checking the channel with Telegram…', 'info');
+    let result;
+    try {
+      result = unwrap(await callCore('telegram_use_channel', { text }));
+    } catch (error) {
+      setStatus('Channel not set — ' + message(error), 'bad');
+      return null;
+    }
+    const used = Boolean(result && result.ok && result.chat);
+    if (used) {
+      $('#telegramChannel').value = '';
+      $('#telegramChatList').hidden = true;
+    }
+    await refreshState();
+    if (used) setStatus('Sending to ' + (result.chat.title || result.chat.id), 'ok');
+    else setStatus('Channel not set — ' + (result && result.error ? result.error : 'Telegram gave no answer'), 'bad');
+    return result;
   }
 
   function applyTheme(choice) {
@@ -1197,7 +1286,12 @@
     $('#queueSearch').addEventListener('input', renderQueue);
     $('#queueTableBtn').addEventListener('click', () => setQueueLayout('table'));
     $('#queueCardsBtn').addEventListener('click', () => setQueueLayout('cards'));
-    $('#telegramManageBtn').addEventListener('click', openTokenDialog);
+    $('#telegramConnectBtn').addEventListener('click', telegramConnect);
+    $('#telegramTokenInput').addEventListener('keydown', event => {
+      if (event.key === 'Enter') { event.preventDefault(); telegramConnect(); }
+    });
+    $('#telegramFindBtn').addEventListener('click', telegramFind);
+    $('#telegramUseBtn').addEventListener('click', () => telegramUse(''));
     $('#importRoot').addEventListener('input', () => { clearImportError(); invalidateImportPreview(); });
     $('#importRoot').addEventListener('keydown', event => {
       if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey && !event.altKey) { event.preventDefault(); checkFolder(); }
@@ -1205,10 +1299,6 @@
     $('#importChooseBtn').addEventListener('click', openFolderBrowser);
     $('#importCheckBtn').addEventListener('click', checkFolder);
     $('#importRunBtn').addEventListener('click', confirmImport);
-    $('#telegramSaveChatBtn').addEventListener('click', () => {
-      saveTelegram('', $('#telegramChatId').value.trim())
-        .catch(err => openDialog({ title: 'Channel not saved', body: message(err), confirmLabel: 'Close', cancelLabel: null }));
-    });
     $('#settingsTargetsBtn').addEventListener('click', () => showSection('targets'));
     $('#settingsUpdateBtn').addEventListener('click', updateDialog);
     $$('[data-browse]').forEach(button => button.addEventListener('click', browseDialog));

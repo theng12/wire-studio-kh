@@ -88,9 +88,15 @@ fn state_reply(state: &Shared) -> Value {
     let (connection, reason) = crate::settings::telegram_status(
         !sec.telegram.bot_token.is_empty(),
         &cfg.telegram_chat,
+        &cfg.telegram_chat_title,
         cfg.telegram_verified.as_ref(),
         &cfg.telegram_verify_error,
     );
+    let verified_bot = cfg
+        .telegram_verified
+        .as_ref()
+        .map(|check| check.bot.clone())
+        .unwrap_or_default();
     let rows = rows(state);
     let mut next_due: Option<String> = None;
     for row in &rows {
@@ -113,6 +119,8 @@ fn state_reply(state: &Shared) -> Value {
             "configured": !sec.telegram.bot_token.is_empty() && !cfg.telegram_chat.is_empty(),
             "token_masked": if sec.telegram.bot_token.is_empty() { String::new() } else { crate::secrets::mask(&sec.telegram.bot_token) },
             "chat": cfg.telegram_chat,
+            "chat_title": cfg.telegram_chat_title,
+            "bot": verified_bot,
             "connection_state": connection,
             "reason": reason,
         },
@@ -358,8 +366,11 @@ fn save_telegram(state: &AppState, payload: Value) -> (u16, Value) {
     cfg.telegram_chat = chat.clone();
 
     // Same rule as the windowed path: saved is not connected until Telegram answers.
+    let mut chat_title = String::new();
     let verification = match crate::adapters::telegram::check_blocking(&sec.telegram.bot_token, &chat) {
         Ok(check) => {
+            chat_title = check.chat.clone();
+            cfg.telegram_chat_title = chat_title.clone();
             cfg.telegram_verified = Some(crate::settings::TelegramCheck {
                 bot: check.bot.clone(),
                 chat: check.chat.clone(),
@@ -370,6 +381,7 @@ fn save_telegram(state: &AppState, payload: Value) -> (u16, Value) {
         }
         Err(error) => {
             cfg.telegram_verified = None;
+            cfg.telegram_chat_title.clear();
             cfg.telegram_verify_error = error.clone();
             json!({ "ok": false, "error": error })
         }
@@ -383,10 +395,110 @@ fn save_telegram(state: &AppState, payload: Value) -> (u16, Value) {
             "ok": true,
             "configured": true,
             "chat": chat,
+            "chat_title": chat_title,
             "token_masked": crate::secrets::mask(&sec.telegram.bot_token),
             "verification": verification,
         }),
     )
+}
+
+fn telegram_chat_json(chat: &crate::adapters::telegram::DiscoveredChat) -> Value {
+    json!({ "id": chat.id.as_str(), "title": chat.title.as_str(), "kind": chat.kind.as_str() })
+}
+
+/// The headless twin of `commands::telegram_connected_as`: a blank token reuses the saved one.
+fn telegram_connected_as(state: &AppState, payload: Value) -> (u16, Value) {
+    let requested = payload
+        .get("token")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let secrets_path = crate::secrets::path_in(&state.data_dir);
+    let mut sec = crate::secrets::load(&secrets_path);
+    let effective = if requested.is_empty() {
+        sec.telegram.bot_token.clone()
+    } else {
+        requested.clone()
+    };
+    if effective.is_empty() {
+        return (400, json!({ "ok": false, "error": "bot token required" }));
+    }
+    let bot = match crate::adapters::telegram::connected_as_blocking(&effective) {
+        Ok(bot) => bot,
+        Err(error) => return (200, json!({ "ok": false, "error": error })),
+    };
+    let changed = !requested.is_empty() && sec.telegram.bot_token != effective;
+    if changed {
+        sec.telegram.bot_token = effective;
+        if let Err(error) = crate::secrets::save(&secrets_path, &sec) {
+            return (400, json!({ "ok": false, "error": format!("cannot save telegram token: {error}") }));
+        }
+    }
+    let settings_path = crate::settings::path_in(&state.data_dir);
+    let mut cfg = crate::settings::load(&settings_path);
+    if changed {
+        cfg.telegram_verified = None;
+        cfg.telegram_verify_error.clear();
+        cfg.telegram_chat_title.clear();
+        if let Err(error) = crate::settings::save(&settings_path, &cfg) {
+            return (400, json!({ "ok": false, "error": format!("cannot save telegram channel: {error}") }));
+        }
+    }
+    let chat_title = cfg
+        .telegram_verified
+        .as_ref()
+        .map(|check| check.chat.clone())
+        .unwrap_or_default();
+    (200, json!({ "ok": true, "bot": bot, "chat_title": chat_title }))
+}
+
+fn telegram_discover(state: &AppState) -> (u16, Value) {
+    let token = crate::secrets::load(&crate::secrets::path_in(&state.data_dir))
+        .telegram
+        .bot_token;
+    if token.is_empty() {
+        return (200, json!({ "ok": false, "error": "Connect the bot first." }));
+    }
+    match crate::adapters::telegram::discover_blocking(&token) {
+        Ok(chats) => (
+            200,
+            json!({ "ok": true, "chats": chats.iter().map(telegram_chat_json).collect::<Vec<_>>() }),
+        ),
+        Err(error) => (200, json!({ "ok": false, "error": error })),
+    }
+}
+
+fn telegram_use_channel(state: &AppState, payload: Value) -> (u16, Value) {
+    let text = payload.get("text").and_then(Value::as_str).unwrap_or("").trim();
+    let token = crate::secrets::load(&crate::secrets::path_in(&state.data_dir))
+        .telegram
+        .bot_token;
+    if token.is_empty() {
+        return (200, json!({ "ok": false, "error": "Connect the bot first." }));
+    }
+    let chat = match crate::adapters::telegram::resolve_blocking(&token, text) {
+        Ok(chat) => chat,
+        Err(error) => return (200, json!({ "ok": false, "error": error })),
+    };
+    let bot = match crate::adapters::telegram::connected_as_blocking(&token) {
+        Ok(bot) => bot,
+        Err(error) => return (200, json!({ "ok": false, "error": error })),
+    };
+    let path = crate::settings::path_in(&state.data_dir);
+    let mut cfg = crate::settings::load(&path);
+    cfg.telegram_chat = chat.id.clone();
+    cfg.telegram_chat_title = chat.title.clone();
+    cfg.telegram_verified = Some(crate::settings::TelegramCheck {
+        bot,
+        chat: chat.title.clone(),
+        at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+    });
+    cfg.telegram_verify_error.clear();
+    if let Err(error) = crate::settings::save(&path, &cfg) {
+        return (400, json!({ "ok": false, "error": format!("cannot save telegram channel: {error}") }));
+    }
+    (200, json!({ "ok": true, "chat": telegram_chat_json(&chat) }))
 }
 
 /// Bind loopback only; a bind failure is returned to main.rs instead of opening a window.
@@ -412,6 +524,9 @@ pub fn serve(state: Shared, port: u16) -> Result<(), String> {
             ("POST", "/api/test/trigger/cancel") => "cancel",
             ("POST", "/api/test/trigger/retry") => "retry",
             ("POST", "/api/test/trigger/save-telegram") => "save-telegram",
+            ("POST", "/api/test/trigger/telegram-connected-as") => "telegram-connected-as",
+            ("POST", "/api/test/trigger/telegram-discover") => "telegram-discover",
+            ("POST", "/api/test/trigger/telegram-use-channel") => "telegram-use-channel",
             ("POST", "/api/test/trigger/import") => "import",
             _ => {
                 let reason = format!("unknown route: {} {}", method.as_str(), path.as_str());
@@ -441,6 +556,9 @@ pub fn serve(state: Shared, port: u16) -> Result<(), String> {
             "schedule" => schedule(&state, payload),
             "cancel" => trigger(&state, payload, false),
             "save-telegram" => save_telegram(&state, payload),
+            "telegram-connected-as" => telegram_connected_as(&state, payload),
+            "telegram-discover" => telegram_discover(&state),
+            "telegram-use-channel" => telegram_use_channel(&state, payload),
             "import" => import_channel(&state, payload),
             _ => trigger(&state, payload, true),
         };

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0 — 2026-11-21
+
+- Connecting a Telegram channel is now done in the app, by anyone, with no browser and no help: paste the bot token from @BotFather and press **Connect** — the app answers "Connected as @your_bot", or Telegram's own refusal word for word.
+- Press **Find my channel** to see every channel the bot can see, listed by name with its kind, and pick one. If the list is empty the card says exactly what to do — add the bot as an administrator, post a message, then **Check again**.
+- Anything else you have also works: paste `@username`, a `t.me` link or the number; the app checks it with Telegram and shows the channel title back for confirmation before saving.
+- The channel name is saved with the id and used everywhere afterwards — the card reads "connected · @your_bot → Wire Smoke Test" and the composer reads "Sending to Wire Smoke Test", never a bare number.
+- Every platform card carries a collapsed **How to connect** block that shows only the step you are on, and disappears once you are connected. YouTube and Facebook use the same pattern.
+
 ## 0.3.1 — 2026-11-21
 
 - The Telegram card stops contradicting itself: it now says **connected** only after Telegram itself confirms the bot and the channel, **saved, not verified** when both are stored but unconfirmed, and shows Telegram's own refusal word for word when the check fails.
