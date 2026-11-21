@@ -2,13 +2,12 @@
 
 (() => {
   // Fallback only: the core reports the real version and applyVersion() uses it.
-  let APP_VERSION = '0.4.0';
+  let APP_VERSION = '0.4.1';
   const WHATS_NEW = [
-    'Connecting Telegram is now a screen, not a browser trick: paste the bot token and press Connect, then press Find my channel and pick your channel by name.',
-    'You can paste what you already have — @username, a t.me link or the number — and the app checks it with Telegram and shows the channel title back before anything is saved.',
-    'Once a channel is connected the app says "Sending to <channel name>" everywhere, and the Telegram card shows "connected · @your_bot → <channel>".',
-    'Every platform card carries a short "How to connect" block that opens with the one step you are on, and disappears once you are connected.',
-    'Telegram never asks for a channel id again.'
+    'Every destination is named the way you see it on Targets — "YouTube", "Facebook Page", "Telegram — Wire Smoke Test" — never an internal id.',
+    'The Queue is shorter: a post takes the room it needs, and the next attempt sits in two short lines under the state.',
+    'Internal words are gone from the screens: no core, no bridge, no feed — plain sentences instead.',
+    'A button you cannot use now looks disabled and says why.'
   ];
   const SUPPORT_URL = 'https://nowpayments.io/donation/studiokh';
   const TEST_ROUTES = {
@@ -24,7 +23,7 @@
   const SECTIONS = {
     composer: { eyebrow: 'Compose', title: 'Composer', subtitle: 'Write a text post, choose where it goes, and send it now or later.' },
     queue: { eyebrow: 'Dispatch', title: 'Queue', subtitle: 'One row per target. Retry or cancel a delivery and see the reason.' },
-    targets: { eyebrow: 'Connections', title: 'Targets', subtitle: 'Telegram, YouTube and Facebook Page — state comes from the core.' },
+    targets: { eyebrow: 'Connections', title: 'Targets', subtitle: 'Where Wire posts. Connecting YouTube and Facebook ships in a later build.' },
     import: { eyebrow: 'Still Posts', title: 'Import Still Posts', subtitle: 'Copies posts and images from a Story Studio KH channel into Wire. Story is never changed.' },
     settings: { eyebrow: 'Preferences', title: 'Settings', subtitle: 'App paths, connections, updates, appearance and about.' }
   };
@@ -35,6 +34,12 @@
   const TIME_FMT = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Asia/Phnom_Penh', day: '2-digit', month: 'short',
     hour: '2-digit', minute: '2-digit', hour12: false
+  });
+  const DAY_FMT = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Phnom_Penh', day: '2-digit', month: 'short'
+  });
+  const TIME_ONLY_FMT = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Phnom_Penh', hour: '2-digit', minute: '2-digit', hour12: false
   });
 
   const $ = (selector, root = document) => root.querySelector(selector);
@@ -299,14 +304,11 @@
       last4: lastFour(telegramRaw.token_masked || telegramRaw.token_last4 || telegramRaw.tokenLast4 || telegramRaw.masked_token || telegramRaw.maskedToken || telegramRaw.mask),
       reason: String(telegramRaw.reason || telegramRaw.error || (configured ? 'Token and channel saved; this build has not reported a verified connection.' : ''))
     };
-    // A bare "telegram:<chat>" target carries no state of its own; the telegram
-    // block's verdict is the same channel, so the composer must not say otherwise.
-    // Its name is the channel's title, so the composer reads "Sending to <title>".
-    const telegramName = telegram.chatTitle || telegram.chatId;
+    // A target id is the core's key, never a name a person reads: every row is
+    // labelled the way the Target page labels it.
     const targets = targetsRaw.map(normalizeTarget).map(target => {
-      if (target.platform !== 'telegram') return target;
-      const named = telegramName ? { ...target, label: 'Telegram — ' + telegramName } : target;
-      return named.connection === 'not_configured' && telegram.connection !== 'not_configured'
+      const named = { ...target, label: targetLabel(target.id, telegram) };
+      return target.platform === 'telegram' && named.connection === 'not_configured' && telegram.connection !== 'not_configured'
         ? { ...named, connection: telegram.connection, reason: telegram.reason }
         : named;
     });
@@ -317,7 +319,10 @@
       targets,
       presets,
       telegram,
-      deliveries: deliveriesRaw.map(normalizeDelivery)
+      deliveries: deliveriesRaw.map(normalizeDelivery).map(row => ({
+        ...row,
+        targetName: targetLabel(row.target, telegram)
+      }))
     };
   }
 
@@ -354,12 +359,25 @@
       : shownState(status, attempts, attention, error, nextAt);
     // shortcut: the 0.1.0 core state has no post text, only a post id; upgrade when state carries text.
     const text = String(row.text || row.post_text || row.body || (row.post_id ? 'Post ' + row.post_id : 'No post text reported.'));
+    const target = String(row.target || row.target_label || row.target_name || row.channel || 'Target not reported');
     return {
-      id: String(row.id || index + 1), text,
-      target: String(row.target || row.target_label || row.target_name || row.channel || 'Target not reported'),
+      id: String(row.id || index + 1), text, target,
       preset: String(row.preset || row.preset_id || row.presetId || ''),
       shown, nextAt, error, attempts
     };
+  }
+
+  // "telegram:-100…" is the core's key, never something a person reads.
+  function targetLabel(target, telegram) {
+    const raw = String(target || '');
+    const platform = raw.split(':')[0];
+    if (platform === 'telegram') {
+      const name = telegram && (telegram.chatTitle || telegram.chatId);
+      return name ? 'Telegram — ' + name : 'Telegram';
+    }
+    if (platform === 'youtube') return 'YouTube';
+    if (platform === 'facebook_page') return 'Facebook Page';
+    return platform || raw;
   }
 
   // The core's version is the app's version (it comes from the build); the
@@ -547,11 +565,20 @@
     return date ? TIME_FMT.format(date) + ' UTC+7' : 'No next attempt reported';
   }
 
+  // Two short lines, so a date never wraps into three in a narrow column.
+  function nextWhen(row) {
+    if (row.shown === 'sent' || row.shown === 'cancelled') return el('span', { text: '—' });
+    if (!row.nextAt) return el('span', { class: 'cell-note', text: 'Not reported' });
+    return el('span', { class: 'when' },
+      el('span', { text: DAY_FMT.format(row.nextAt) }),
+      el('span', { class: 'cell-note', text: TIME_ONLY_FMT.format(row.nextAt) + ' UTC+7' }));
+  }
+
   function filteredRows() {
     const query = $('#queueSearch').value.trim().toLowerCase();
     if (!query) return state.deliveries;
     return state.deliveries.filter(row =>
-      [row.text, row.target, row.shown, row.error].some(value => String(value).toLowerCase().includes(query)));
+      [row.text, row.targetName, row.shown, row.error].some(value => String(value).toLowerCase().includes(query)));
   }
 
   function renderQueue() {
@@ -601,20 +628,23 @@
     rows.forEach(row => {
       const postCell = el('td', {}, el('div', { class: 'row-title', text: excerpt(row.text) }));
       if (row.error) postCell.append(el('div', { class: 'cell-note', text: row.error }));
-      const targetCell = el('td', {}, el('span', { text: row.target }));
+      const targetCell = el('td', {}, el('span', { text: row.targetName, title: row.target }));
       if (row.preset) targetCell.append(el('div', { class: 'cell-note', text: presetLabel(row.preset) }));
+      const stateCell = el('td', {},
+        stateChip(row),
+        el('div', { class: 'cell-note', text: 'attempt ' + (row.attempts || 0) }),
+        row.shown === 'sent' || row.shown === 'cancelled' ? null : el('div', { class: 'cell-note' }, nextWhen(row)));
       body.append(el('tr', {},
         postCell,
         targetCell,
-        el('td', {}, stateChip(row), el('div', { class: 'cell-note', text: 'attempt ' + (row.attempts || 0) })),
-        el('td', { class: 'mono', text: row.shown === 'sent' || row.shown === 'cancelled' ? '—' : formatWhen(row.nextAt) }),
+        stateCell,
         el('td', {}, actionButtons(row))
       ));
     });
-    const table = el('table', {},
+    const table = el('table', { class: 'queue-table' },
       el('thead', {}, el('tr', {},
         el('th', { text: 'Post' }), el('th', { text: 'Target' }), el('th', { text: 'State' }),
-        el('th', { text: 'Next attempt (UTC+7)' }), el('th', { text: 'Actions' })
+        el('th', { text: 'Actions' })
       )), body);
     return el('div', { class: 'table-wrap' }, table);
   }
@@ -622,11 +652,11 @@
   function renderCards(rows) {
     const list = el('div', { class: 'card-list' });
     rows.forEach(row => {
-      const targetBox = el('div', {}, el('span', { text: 'Target' }), el('strong', { text: row.target }));
+      const targetBox = el('div', {}, el('span', { text: 'Target' }), el('strong', { text: row.targetName, title: row.target }));
       if (row.preset) targetBox.append(el('div', { class: 'cell-note', text: presetLabel(row.preset) }));
       const meta = el('div', { class: 'queue-meta' },
         targetBox,
-        el('div', {}, el('span', { text: 'Next attempt (UTC+7)' }), el('strong', { class: 'mono', text: row.shown === 'sent' || row.shown === 'cancelled' ? '—' : formatWhen(row.nextAt) })),
+        el('div', {}, el('span', { text: 'Next attempt' }), el('strong', { class: 'mono' }, nextWhen(row))),
         el('div', {}, el('span', { text: 'Attempts' }), el('strong', { text: String(row.attempts || 0) }))
       );
       list.append(el('article', { class: 'queue-card' },
@@ -699,11 +729,13 @@
       ? target.reason
       : connection === 'ready' ? 'Connection verified by the core.'
         : connection === 'failed' ? 'Connection failed; no reason reported by the core.'
-          : 'No verified connection reported by the core yet.';
+          : 'Not connected yet.';
   }
 
   function renderSettings() {
-    $('#dataFolder').value = state.dataDir || 'Not reported by core';
+    const dataFolder = $('#dataFolder');
+    dataFolder.value = state.dataDir || 'Not reported';
+    dataFolder.title = state.dataDir || 'The app has not reported its data folder yet.';
     $$('[data-theme-choice]').forEach(button => {
       button.classList.toggle('is-active', button.dataset.themeChoice === storageGet('wire.appearance', 'system'));
     });
@@ -1134,17 +1166,17 @@
   }
 
   function retryDelivery(row) {
-    runDeliveryAction('retry_delivery', row.id, 'Retry requested for ' + row.target)
+    runDeliveryAction('retry_delivery', row.id, 'Retry requested for ' + row.targetName)
       .catch(err => openDialog({ title: 'Retry failed', body: message(err), confirmLabel: 'Close', cancelLabel: null }));
   }
 
   function confirmCancel(row) {
     openDialog({
       title: 'Cancel delivery',
-      meta: row.target + ' · ' + row.id,
+      meta: row.targetName + ' · ' + row.id,
       body: 'A queued delivery will stop. If the post has already reached the channel it may still appear — cancel never means unsent.',
       confirmLabel: 'Cancel delivery', cancelLabel: 'Keep', destructive: true,
-      onConfirm: () => runDeliveryAction('cancel_delivery', row.id, 'Cancellation requested for ' + row.target)
+      onConfirm: () => runDeliveryAction('cancel_delivery', row.id, 'Cancellation requested for ' + row.targetName)
     });
   }
 

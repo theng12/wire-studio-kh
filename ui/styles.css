@@ -250,10 +250,18 @@ tbody tr:last-child td { border-bottom: 0; }
 .excerpt { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; font-variant-numeric: tabular-nums; }
 .cell-note { margin-top: var(--sp-1); font-size: 12px; color: var(--muted); }
-.row-actions { display: flex; gap: 6px; }
+/* Post takes the room it needs; the rest stays fixed so nothing wraps three deep. */
+.queue-table { table-layout: fixed; }
+.queue-table th:nth-child(1), .queue-table td:nth-child(1) { width: auto; min-width: 260px; }
+.queue-table th:nth-child(2), .queue-table td:nth-child(2) { width: 180px; }
+.queue-table th:nth-child(3), .queue-table td:nth-child(3) { width: 170px; }
+.queue-table th:nth-child(4), .queue-table td:nth-child(4) { width: 184px; padding-left: var(--sp-2); padding-right: var(--sp-2); }
+.when { display: grid; gap: 2px; }
+.when .cell-note { margin-top: 0; }
+.row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .mini-button { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 4px 9px; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--panel); font-size: 12px; }
 .mini-button:hover:not(:disabled) { background: var(--panel-2); }
-.mini-button:disabled { opacity: .45; cursor: not-allowed; }
+.mini-button:disabled { opacity: .45; cursor: not-allowed; background: transparent; border-style: dashed; }
 .card-list { display: grid; gap: var(--sp-3); }
 .queue-card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-card); padding: var(--sp-4); }
 .queue-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3); }

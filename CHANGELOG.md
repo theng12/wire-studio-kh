@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.1 — 2026-11-21
+
+- Every destination is named the way you see it on Targets: the Queue and the Composer now say "YouTube", "Facebook Page" and "Telegram — Wire Smoke Test" instead of internal ids.
+- The Queue is shorter and easier to scan: a post takes the room it needs, the channel and state sit in fixed columns, and the next attempt is two short lines under the state.
+- Plain words replace internal ones: "Where Wire keeps its posts and queue", "Not connected yet", "Not checked yet" — no mentions of a core, a bridge or a signed feed.
+- A button that cannot be used now looks disabled and says why; Browse… is disabled until folder choosing ships.
+- Small fixes: "One caption" instead of "Plain text only", a shorter channel example, and the missing space before a comma in the Telegram steps.
+
 ## 0.4.0 — 2026-11-21
 
 - Connecting a Telegram channel is now done in the app, by anyone, with no browser and no help: paste the bot token from @BotFather and press **Connect** — the app answers "Connected as @your_bot", or Telegram's own refusal word for word.
