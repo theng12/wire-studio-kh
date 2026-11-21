@@ -144,10 +144,10 @@ pub async fn connect(
         cfg.gateway_url = url.trim().trim_end_matches('/').to_string();
     }
     if cfg.gateway_url.is_empty() {
-        return serde_json::json!({ "ok": false, "error": "Add the Gateway address first." });
+        return serde_json::json!({ "ok": false, "reason": "Add the Gateway address first." });
     }
     if sec.gateway_key.is_empty() {
-        return serde_json::json!({ "ok": false, "error": "Add the Gateway API key first." });
+        return serde_json::json!({ "ok": false, "reason": "Add the Gateway API key first." });
     }
     if let Err(error) = crate::secrets::save(&secrets_path, &sec) {
         return serde_json::json!({ "ok": false, "error": format!("cannot save the Gateway key: {error}") });
