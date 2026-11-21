@@ -504,8 +504,10 @@ mod tests {
             )
             .unwrap();
         assert!(store.claim_due(Utc::now()).unwrap().is_some());
-        assert_eq!(row_for(&store, &ids[0]).sent_late_minutes, Some(30));
+        // Whole minutes from a float julianday can round one minute either way.
+        let late = row_for(&store, &ids[0]).sent_late_minutes.expect("lateness recorded");
+        assert!((29..=30).contains(&late), "lateness was {late}");
         store.mark_sent(&ids[0], None, None).unwrap();
-        assert_eq!(row_for(&store, &ids[0]).sent_late_minutes, Some(30));
+        assert_eq!(row_for(&store, &ids[0]).sent_late_minutes, Some(late));
     }
 }
