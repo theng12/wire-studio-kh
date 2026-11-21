@@ -2,11 +2,13 @@
 
 pub mod adapters;
 pub mod commands;
+pub mod dispatch;
 pub mod feedcheck;
 pub mod gateway;
 pub mod hold;
 pub mod queue;
 pub mod secrets;
+pub mod settings;
 pub mod testmode;
 
 use std::path::{Path, PathBuf};
@@ -63,8 +65,9 @@ pub fn start_hold(state: Shared, port: u16) {
 pub fn run_app() {
     let state = init_state(&data_dir()).expect("core state");
     start_hold(state.clone(), 8649);
+    dispatch::spawn(state.clone());
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             use tauri::Manager;
             if let Some(w) = app.get_webview_window("main") {
@@ -73,6 +76,25 @@ pub fn run_app() {
             }
         }))
         .manage(state)
-        .run(tauri::generate_context!())
-        .expect("error while running Wire Studio KH");
+        .invoke_handler(tauri::generate_handler![
+            commands::state,
+            commands::queue_post,
+            commands::cancel_delivery,
+            commands::retry_delivery,
+            commands::save_telegram,
+            commands::save_appearance,
+            commands::check_updates,
+        ])
+        .build(tauri::generate_context!())
+        .expect("error while building Wire Studio KH");
+
+    app.run(|handle, event| {
+        use tauri::Manager;
+        if let tauri::RunEvent::Reopen { .. } = event {
+            if let Some(w) = handle.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+        }
+    });
 }

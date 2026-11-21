@@ -3,12 +3,175 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Wire Studio KH</title>
+  <title>Wire Studio KH 0.1.0</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <aside class="sidebar" id="sidebar"></aside>
-  <main class="page" id="page"></main>
+  <svg class="svg-sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="i-compose" viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17v3Z"/><path d="M14.5 7.5 17 10"/></symbol>
+    <symbol id="i-queue" viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12"/><path d="M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+    <symbol id="i-targets" viewBox="0 0 24 24"><path d="m3 11 17-7-7 17-2.5-7.5L3 11Z"/><path d="M10.5 13.5 20 4"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4v-.2a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.6-1H3v-4h.2a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.4 7 7.2 4.2l.1.1a1.7 1.7 0 0 0 1.9.3H9.2a1.7 1.7 0 0 0 1-1.6V3h4v.2a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.6 1h.2v4h-.2a1.7 1.7 0 0 0-1.6 1Z"/></symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24"><path d="M20.4 5.6a4.7 4.7 0 0 0-6.7 0L12 7.3l-1.7-1.7a4.7 4.7 0 0 0-6.7 6.7L12 20.7l8.4-8.4a4.7 4.7 0 0 0 0-6.7Z"/></symbol>
+    <symbol id="i-update" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 6.1"/><path d="M20 4v7h-7"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 4 4"/></symbol>
+    <symbol id="i-table" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10"/></symbol>
+    <symbol id="i-cards" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/></symbol>
+    <symbol id="i-retry" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 1 2.3 5.7"/><path d="M4 5v7h7"/></symbol>
+    <symbol id="i-cancel" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7"/></symbol>
+  </svg>
+
+  <div class="app">
+    <aside class="sidebar" aria-label="Sidebar">
+      <div class="brand">
+        <span class="brand-seal" aria-hidden="true"></span>
+        <span class="brand-text"><strong>Wire Studio</strong><small>Text dispatch</small></span>
+      </div>
+
+      <nav class="nav" aria-label="Sections">
+        <button class="nav-item is-active" type="button" data-section="composer" aria-current="page"><svg class="icon" aria-hidden="true"><use href="#i-compose"/></svg><span class="nav-label">Composer</span></button>
+        <button class="nav-item" type="button" data-section="queue"><svg class="icon" aria-hidden="true"><use href="#i-queue"/></svg><span class="nav-label">Queue</span></button>
+        <button class="nav-item" type="button" data-section="targets"><svg class="icon" aria-hidden="true"><use href="#i-targets"/></svg><span class="nav-label">Targets</span></button>
+        <button class="nav-item" type="button" data-section="settings"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span class="nav-label">Settings</span></button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button class="support" id="supportBtn" type="button"><svg class="icon" aria-hidden="true"><use href="#i-heart"/></svg><span class="support-label">Support this app</span></button>
+        <div class="footer-band">
+          <button class="version-pill" id="whatsNewBtn" type="button" title="What's New" aria-label="Wire Studio KH 0.1.0, open What's New"><span class="pill-name">Wire Studio KH</span> <span class="pill-version">0.1.0</span></button>
+          <button class="icon-button" id="updateBtn" type="button" title="Check for updates" aria-label="Check for updates"><svg class="icon" aria-hidden="true"><use href="#i-update"/></svg></button>
+        </div>
+        <p class="footer-status" id="statusLine" role="status" aria-live="polite">Checking core…</p>
+      </div>
+    </aside>
+
+    <main class="page" id="page">
+      <header class="page-header">
+        <p class="eyebrow" id="pageEyebrow">Compose</p>
+        <h1 id="pageTitle">Composer</h1>
+        <p class="page-subtitle" id="pageSubtitle">Write a text post, choose where it goes, and send it now or later.</p>
+      </header>
+
+      <div class="offline-banner" id="offlineBanner" role="alert" hidden>
+        <div><strong>Core is not answering — nothing is queued.</strong><p class="help" id="offlineDetail">The app bridge and test API did not respond.</p></div>
+        <button class="button subtle" id="offlineRetry" type="button">Retry</button>
+      </div>
+
+      <section class="view" id="composerView" aria-label="Composer">
+        <div class="card">
+          <div class="card-head"><h2>New post</h2><span class="hint">Plain text only</span></div>
+          <div class="field">
+            <label for="postText">Post text</label>
+            <textarea id="postText" rows="7" placeholder="Write your post here…" spellcheck="true"></textarea>
+            <p class="help">Plain text only — no AI, formatting or media in 0.1.0.</p>
+            <p class="counter" id="charCount">0 characters</p>
+          </div>
+          <fieldset class="field">
+            <legend>Send to</legend>
+            <div class="check-list" id="targetChecks"></div>
+            <p class="help">Every chosen target gets its own queue row, so nothing is posted twice.</p>
+          </fieldset>
+          <fieldset class="field">
+            <legend>When</legend>
+            <div class="radio-list">
+              <label class="radio"><input type="radio" name="schedule" value="now" checked> Now</label>
+              <label class="radio"><input type="radio" name="schedule" value="15"> In 15 minutes</label>
+              <label class="radio"><input type="radio" name="schedule" value="60"> In 1 hour</label>
+              <label class="radio"><input type="radio" name="schedule" value="pick"> Pick date &amp; time</label>
+            </div>
+            <div class="picker">
+              <label class="visually-hidden" for="schedulePick">Date and time in UTC+7</label>
+              <input type="datetime-local" id="schedulePick" disabled>
+              <p class="help">Pick Phnom Penh time (UTC+7); the core stores UTC.</p>
+            </div>
+          </fieldset>
+          <p class="inline-error" id="composerError" role="alert" hidden></p>
+          <div class="actions"><button class="button primary" id="queueBtn" type="button">Queue post</button><span class="kbd-hint">⌘↵ to queue</span></div>
+        </div>
+      </section>
+
+      <section class="view" id="queueView" aria-label="Queue" hidden>
+        <div class="card toolbar">
+          <div class="field compact">
+            <label class="visually-hidden" for="queueSearch">Search queue</label>
+            <input type="search" id="queueSearch" placeholder="Search posts, targets, states" autocomplete="off">
+            <p class="help">Filters the current queue; ⌘K jumps here.</p>
+          </div>
+          <div class="segmented" role="group" aria-label="Queue layout">
+            <button class="segment is-active" id="queueTableBtn" type="button" aria-pressed="true"><svg class="icon" aria-hidden="true"><use href="#i-table"/></svg> Table</button>
+            <button class="segment" id="queueCardsBtn" type="button" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#i-cards"/></svg> Cards</button>
+          </div>
+        </div>
+        <div id="queueContent"></div>
+      </section>
+
+      <section class="view" id="targetsView" aria-label="Targets" hidden>
+        <div class="card">
+          <div class="card-head"><h2>Telegram</h2><span class="chip" id="telegramChip">not configured</span></div>
+          <p class="reason" id="telegramReason">No connection state reported by the core yet.</p>
+          <div class="target-grid">
+            <div class="field">
+              <span class="field-label" id="tokenLabel">Bot token</span>
+              <div class="readonly-value" id="telegramToken">No token saved</div>
+              <p class="help" id="tokenHelp">Only the last four characters can be shown; the full token stays in the core's secrets file.</p>
+            </div>
+            <div class="field">
+              <label for="telegramChatId">Channel id</label>
+              <input type="text" id="telegramChatId" placeholder="-100…" autocomplete="off">
+              <p class="help">Bot must be an admin of this channel before delivery can succeed.</p>
+            </div>
+          </div>
+          <div class="actions"><button class="button" id="telegramManageBtn" type="button">Add token</button><button class="button subtle" id="telegramSaveChatBtn" type="button">Save channel</button></div>
+        </div>
+      </section>
+
+      <section class="view" id="settingsView" aria-label="Settings" hidden>
+        <div class="card">
+          <div class="card-head"><h2>This app</h2><span class="hint">Version 0.1.0</span></div>
+          <div class="setting-row">
+            <div><label for="dataFolder">Data folder</label><p class="help">Read from the core; Browse… is a hook stub in 0.1.0.</p></div>
+            <div class="path-field"><input type="text" id="dataFolder" value="Not reported by core" readonly><button class="button subtle" data-browse="data" type="button">Browse…</button></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Connections</h2></div>
+          <div class="setting-row">
+            <div><span class="field-label">Telegram</span><p class="help" id="settingsTelegramHelp">Connection state comes from the core.</p></div>
+            <button class="button subtle" id="settingsTargetsBtn" type="button">Manage targets</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Updates</h2></div>
+          <div class="setting-row">
+            <div><span class="field-label">Update check</span><p class="help">Not checked yet — checking reads the signed feed when the updater bridge is wired.</p></div>
+            <button class="button subtle" id="settingsUpdateBtn" type="button">Check now</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Appearance</h2></div>
+          <div class="setting-row">
+            <div><span class="field-label" id="appearanceLabel">Theme</span><p class="help">System follows this Mac; Light and Dark override it live.</p></div>
+            <div class="segmented" role="group" aria-labelledby="appearanceLabel" id="themeGroup">
+              <button class="segment" type="button" data-theme-choice="system" aria-pressed="true">System</button>
+              <button class="segment" type="button" data-theme-choice="light" aria-pressed="false">Light</button>
+              <button class="segment" type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>About</h2></div>
+          <div class="setting-row">
+            <div><span class="field-label">Wire Studio KH 0.1.0</span><p class="help">Free and unlocked. What's New lists this release's changes.</p></div>
+            <div class="button-row"><button class="button subtle" id="aboutWhatsNewBtn" type="button">What's New</button><button class="button subtle" id="aboutSupportBtn" type="button">Support</button></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="dialog-layer" id="dialogs"></div>
   <script src="app.js"></script>
 </body>
 </html>
