@@ -1,6 +1,8 @@
 //! Wire Studio KH core: queue, delivery adapters, Gateway client, update hold.
 
 pub mod adapters;
+pub mod commands;
+pub mod feedcheck;
 pub mod gateway;
 pub mod hold;
 pub mod queue;

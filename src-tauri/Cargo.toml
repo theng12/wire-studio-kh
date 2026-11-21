@@ -29,6 +29,8 @@ uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"
 rand = "0.8"
 libc = "0.2"
+base64 = "0.22"
+ed25519-dalek = { version = "2", features = ["verify"] }
 
 [profile.release]
 strip = true
