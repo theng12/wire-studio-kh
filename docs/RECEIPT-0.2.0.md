@@ -18,9 +18,12 @@ the pool builder, recipes editor, renderer and the real Production import are st
 
 ## Not done (named, not hidden)
 
-- No real import: this Mac has **no live Still Posts channel** and no Story library
-  root. The importer never guesses one; Production's inventory is being read on
-  story-mini and the report will be built from what comes back.
+- No real import yet: Production's inventory (read on story-mini, 2026-11-21) is
+  **1 channel populated with Still Posts and 30 without** — `little-weather-within`,
+  9 posts; the library root is
+  `/build/Documents/Story Studio KH/Story Studio Projects` across 31 live
+  channels. That is a true report, not a failure. Staging of that one channel to this
+  Mac is in progress; the importer never guesses a library root.
 - Recipes link by id rather than writing `wire.db` post rows.
 - Imported recipes carry `renderable:false` because Wire has no layer renderer yet.
 - Account/token import needs a secrets schema change and belongs with the next batch.
