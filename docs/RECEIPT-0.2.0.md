@@ -39,10 +39,27 @@ Run against the staged copy at
 The run is reproducible with
 `cargo test --lib real_channel_report -- --ignored --nocapture`.
 
-Two defects the real data exposed and this receipt records: the importer required a
-`font-pool-cursor.json` that does not exist, and it required `project.json` that the
-Production channel does not carry — both now optional, and the channel's identity falls
-back to its folder name.
+### Defects found by the real data (not by the fixture)
+
+1. **A `font-pool-cursor.json` that does not exist anywhere was required.** Found when the
+   first real scan failed on a file Production does not have. Fix: removed the lookup;
+   fonts come from `config.json` when present and a channel without font pools still
+   imports.
+2. **`project.json` was required, and this channel never carried one.** Found on the same
+   scan. Fix: `project.json` and `config.json` are optional; the channel's identity falls
+   back to its folder name.
+3. **A queue test asserted lateness exactly.** Found only on the second full-suite run
+   (29 vs 30 minutes from float `julianday` rounding). Fix: accept one minute of rounding.
+
+These three are the reason the import is honest rather than merely green: a fixture could
+not have found any of them.
+
+## What this proof is, and what it is not
+
+This is **proven through the core test on a temp data dir**: the scan and apply ran as
+unit tests against the staged Production channel and a scratch Wire data directory.
+The binary build and a run driven through the app's own import route still owe one pass,
+deferred while Hub's gate holds the heavy lane; publishing 0.2.0 waits for that pass.
 - Recipes link by id rather than writing `wire.db` post rows.
 - Imported recipes carry `renderable:false` because Wire has no layer renderer yet.
 - Account/token import needs a secrets schema change and belongs with the next batch.
