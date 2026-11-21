@@ -75,6 +75,12 @@ if [ ! -x "$py" ] || ! "$py" -c 'import fastapi, uvicorn, httpx' 2>/dev/null; th
 fi
 
 # ---------- a real Gateway, isolated in the temp dir ----------
+# The check M001's issue row asks for: the live endpoint file Relay reads must be byte-identical
+# afterwards (or still absent). A test run never edits another app's live config.
+live_endpoint="$HOME/.kh/gateway-endpoint.json"
+live_before="absent"
+[ -e "$live_endpoint" ] && live_before="$(shasum -a 256 "$live_endpoint" | awk '{print $1}')"
+
 gw_port="$(free_port)"
 gw_key="wire-proof-one-$RANDOM"
 gw_dir="$tmp/gateway"
@@ -99,11 +105,12 @@ done
 if [ "$gw_up" = "1" ]; then pass "local Gateway answers /health"; else
   bad "local Gateway answers /health" "not up; log tail: $(tail -3 "$tmp/gateway.log" | tr '\n' ' ')"; exit 1
 fi
-if [ -e "$HOME/.kh/gateway-endpoint.json" ]; then
-  # Prove the isolation: the probe must not have touched the owner's endpoint file.
-  bad "owner's ~/.kh/gateway-endpoint.json untouched" "file exists — check GATEWAY_ENDPOINT_FILE wiring"
+live_after="absent"
+[ -e "$live_endpoint" ] && live_after="$(shasum -a 256 "$live_endpoint" | awk '{print $1}')"
+if [ "$live_before" = "$live_after" ]; then
+  pass "the live ~/.kh/gateway-endpoint.json is unchanged ($live_after)"
 else
-  pass "owner's ~/.kh/gateway-endpoint.json untouched"
+  bad "the live ~/.kh/gateway-endpoint.json is unchanged" "was $live_before, now $live_after — GATEWAY_ENDPOINT_FILE is not pinned"
 fi
 
 # ---------- Wire, hidden, with its own data dir ----------
