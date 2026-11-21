@@ -63,23 +63,24 @@ fn assets(post: &PlannedPost) -> Vec<Asset> {
     let mut out = Vec::new();
 
     for panel in &post.panels {
-        let image = &panel.image;
-        out.push(Asset {
-            filename: image.filename.clone(),
-            path: image.path.clone(),
-            sha256: image.sha256.clone(),
-            kind: "panel",
-            aspect: default_aspect.clone(),
-            rendered_at: image.rendered_at.clone(),
-            model_id: image.model_id.clone(),
-            model_label: image.model_label.clone(),
-            prompt: image.prompt.clone(),
-            character_ids: image.reference_character_ids.clone(),
-            character_names: image.reference_names.clone(),
-            style_hash: None,
-            font_id: post.font_id.clone(),
-            text: Some(panel.text.clone()),
-        });
+        for image in &panel.images {
+            out.push(Asset {
+                filename: image.filename.clone(),
+                path: image.path.clone(),
+                sha256: image.sha256.clone(),
+                kind: "panel",
+                aspect: image.aspect.clone().or_else(|| default_aspect.clone()),
+                rendered_at: image.rendered_at.clone(),
+                model_id: image.model_id.clone(),
+                model_label: image.model_label.clone(),
+                prompt: image.prompt.clone(),
+                character_ids: image.reference_character_ids.clone(),
+                character_names: image.reference_names.clone(),
+                style_hash: None,
+                font_id: post.font_id.clone(),
+                text: Some(panel.text.clone()),
+            });
+        }
     }
 
     for final_ in &post.finals {
@@ -89,7 +90,7 @@ fn assets(post: &PlannedPost) -> Vec<Asset> {
                 .as_ref()
                 .map_or(true, |id| id == &candidate.id)
         });
-        let image = panel.map(|panel| &panel.image);
+        let image = panel.and_then(|panel| panel.images.first());
         out.push(Asset {
             filename: final_.filename.clone(),
             path: final_.path.clone(),
@@ -333,8 +334,6 @@ pub fn apply(plan: &ImportPlan, data_dir: &Path) -> Result<ImportReport, String>
             "allow_repeat": font.allow_repeat,
             "fonts": font.fonts,
             "weights": font.weights,
-            "last_font_id": font.last_font_id,
-            "last_index": font.last_index,
         }));
         fonts_dirty = true;
     }

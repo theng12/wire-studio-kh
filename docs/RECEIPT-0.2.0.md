@@ -18,12 +18,31 @@ the pool builder, recipes editor, renderer and the real Production import are st
 
 ## Not done (named, not hidden)
 
-- No real import yet: Production's inventory (read on story-mini, 2026-11-21) is
-  **1 channel populated with Still Posts and 30 without** — `little-weather-within`,
-  9 posts; the library root is
-  `/build/Documents/Story Studio KH/Story Studio Projects` across 31 live
-  channels. That is a true report, not a failure. Staging of that one channel to this
-  Mac is in progress; the importer never guesses a library root.
+## Real import report — `little-weather-within` (2026-11-21)
+
+Run against the staged copy at
+`_orchestra/youtube-stack/wire-still-posts-fixture-20261121/little-weather-within/`
+(40 files, 47,223,288 bytes; the hand-over `README-fixture.md` is excluded).
+
+| | |
+|---|---|
+| Channels with Still Posts | **1** (`little-weather-within`); **30 without** — a true report |
+| Posts scanned | 9 (`post-0001`…`post-0009`) |
+| Imported | **9** |
+| Skipped | **0** |
+| Images copied | 30, byte-verified (posts 0007–0009 carry the 1:1 pair only; imported without complaint) |
+| Bytes copied | 47,164,542 |
+| Source unchanged | **true** (every source file's mtime, size and SHA-256 identical before and after) |
+| Second run | 0 copied, 9 `already_present` — the ledger works |
+| Ledger | `imports/ledger.json`, keyed by channel + post id + content hash |
+
+The run is reproducible with
+`cargo test --lib real_channel_report -- --ignored --nocapture`.
+
+Two defects the real data exposed and this receipt records: the importer required a
+`font-pool-cursor.json` that does not exist, and it required `project.json` that the
+Production channel does not carry — both now optional, and the channel's identity falls
+back to its folder name.
 - Recipes link by id rather than writing `wire.db` post rows.
 - Imported recipes carry `renderable:false` because Wire has no layer renderer yet.
 - Account/token import needs a secrets schema change and belongs with the next batch.

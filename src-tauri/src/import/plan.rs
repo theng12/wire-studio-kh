@@ -27,6 +27,7 @@ pub struct SourceSnapshot {
 pub struct PlannedImage {
     pub filename: String,
     pub sha256: String,
+    pub aspect: Option<String>,
     #[serde(skip)]
     pub path: PathBuf,
     pub rendered_at: Option<String>,
@@ -41,7 +42,7 @@ pub struct PlannedImage {
 pub struct PlannedPanel {
     pub id: String,
     pub text: String,
-    pub image: PlannedImage,
+    pub images: Vec<PlannedImage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -93,8 +94,6 @@ pub struct PlannedFont {
     pub allow_repeat: bool,
     pub fonts: Vec<PlannedFontChoice>,
     pub weights: Vec<f64>,
-    pub last_font_id: Option<String>,
-    pub last_index: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -181,26 +180,53 @@ pub(crate) fn safe_filename(name: &str) -> bool {
         && Path::new(name).file_name().and_then(|part| part.to_str()) == Some(name)
 }
 
-/// Read `project.json`, `config.json`, every `post-*/post.json` and the font cursor.
-/// Nothing in the channel is written, renamed or moved.
+fn aspect_from_filename(name: &str) -> Option<String> {
+    let suffix = name.strip_suffix(".png")?.rsplit_once('-')?.1;
+    let (width, height) = suffix.split_once('x')?;
+    if matches!(suffix, "1x1" | "9x16" | "16x9") {
+        Some(format!("{width}:{height}"))
+    } else {
+        None
+    }
+}
+
+/// Read `project.json`, `config.json`, every `post-*/post.json` and each declared art file.
+/// Nothing in the channel is written, renamed or moved. The font cursor is not channel state
+/// in Production, so it is never read.
 pub fn scan(channel_dir: &Path) -> Result<ImportPlan, String> {
     let mut scanner = Scanner::default();
 
-    let project_raw = scanner.read(&channel_dir.join("project.json"))?;
-    let project = parse_json(&project_raw, "project.json")?;
-    let channel_slug = str_field(&project, "slug")
-        .ok_or_else(|| "project.json has no slug".to_string())?
-        .to_string();
-    let channel_name = str_field(&project, "name")
+    // Production channels carry config.json; project.json and the font cursor are
+    // not guaranteed (verified on story-mini 2026-11-21). A thin channel still imports.
+    let dir_slug = channel_dir
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "channel".to_string());
+
+    let project = match scanner.read(&channel_dir.join("project.json")) {
+        Ok(raw) => parse_json(&raw, "project.json").ok(),
+        Err(_) => None,
+    };
+    let config = match scanner.read(&channel_dir.join("config.json")) {
+        Ok(raw) => parse_json(&raw, "config.json").ok(),
+        Err(_) => None,
+    };
+
+    let channel_slug = project
+        .as_ref()
+        .and_then(|p| str_field(p, "slug"))
+        .map(str::to_string)
+        .unwrap_or_else(|| dir_slug.clone());
+    let channel_name = project
+        .as_ref()
+        .and_then(|p| str_field(p, "name"))
         .map(str::to_string)
         .unwrap_or_else(|| channel_slug.clone());
 
-    let config_raw = scanner.read(&channel_dir.join("config.json"))?;
-    let config = parse_json(&config_raw, "config.json")?;
-
-    let cursor_raw = scanner.read(&channel_dir.join("still-posts/font-pool-cursor.json"))?;
-    let cursor = parse_json(&cursor_raw, "font-pool-cursor.json")?;
-    let fonts = plan_fonts(&config, &cursor);
+    let fonts = match &config {
+        Some(config) => plan_fonts(config),
+        None => Vec::new(),
+    };
 
     let posts_dir = channel_dir.join("still-posts/posts");
     let entries = fs::read_dir(&posts_dir)
@@ -220,7 +246,10 @@ pub fn scan(channel_dir: &Path) -> Result<ImportPlan, String> {
     let mut skipped = Vec::new();
     for dir in post_dirs {
         match plan_post(&dir, &mut scanner) {
-            Ok(post) => posts.push(post),
+            Ok(planned) => {
+                posts.push(planned.post);
+                skipped.extend(planned.skipped);
+            }
             Err(reason) => skipped.push(Skipped {
                 path: dir.join("post.json").to_string_lossy().into_owned(),
                 reason,
@@ -240,7 +269,13 @@ pub fn scan(channel_dir: &Path) -> Result<ImportPlan, String> {
     })
 }
 
-fn plan_post(dir: &Path, scanner: &mut Scanner) -> Result<PlannedPost, String> {
+struct PostPlan {
+    post: PlannedPost,
+    skipped: Vec<Skipped>,
+}
+
+fn plan_post(dir: &Path, scanner: &mut Scanner) -> Result<PostPlan, String> {
+    let mut file_skips = Vec::new();
     let raw_bytes = scanner
         .read(&dir.join("post.json"))
         .map_err(|_| "post.json cannot be read".to_string())?;
@@ -263,72 +298,157 @@ fn plan_post(dir: &Path, scanner: &mut Scanner) -> Result<PlannedPost, String> {
     } else if !first_panel_text.trim().is_empty() {
         first_panel_text.to_string()
     } else {
-        return Err("no text: caption and panel text are empty".to_string());
+        return Err("post.json has no text: caption and panel text are empty".to_string());
     };
 
     let finals_raw = raw
         .get("finals")
         .and_then(Value::as_array)
-        .ok_or_else(|| "no finals".to_string())?;
-    if finals_raw.is_empty() {
-        return Err("no finals".to_string());
-    }
+        .filter(|items| !items.is_empty())
+        .ok_or_else(|| "no final image in post.json".to_string())?;
 
     let mut panels = Vec::new();
-    for panel in panels_raw {
-        let image = panel
-            .get("image")
-            .and_then(Value::as_object)
-            .ok_or_else(|| "panel has no image".to_string())?;
-        let image_value = Value::Object(image.clone());
-        let filename = str_field(&image_value, "filename")
-            .ok_or_else(|| "panel image has no filename".to_string())?;
-        if !safe_filename(filename) {
-            return Err(format!("unsafe image filename: {filename}"));
+    for (index, panel) in panels_raw.iter().enumerate() {
+        let panel_id = str_field(panel, "id").unwrap_or_default().to_string();
+        let mut declared: Vec<Value> = Vec::new();
+        if let Some(image) = panel.get("image").and_then(Value::as_object) {
+            declared.push(Value::Object(image.clone()));
         }
-        let expected = str_field(&image_value, "sha256")
-            .ok_or_else(|| format!("image {filename} has no sha256"))?;
-        let path = dir.join(filename);
-        if !path.is_file() {
-            return Err(format!("image {filename} missing"));
+        if let Some(images) = panel.get("images").and_then(Value::as_object) {
+            for (aspect, image) in images {
+                if let Some(object) = image.as_object() {
+                    let mut value = Value::Object(object.clone());
+                    if str_field(&value, "aspect").is_none() {
+                        if let Some(map) = value.as_object_mut() {
+                            map.insert("aspect".to_string(), Value::String(aspect.clone()));
+                        }
+                    }
+                    declared.push(value);
+                }
+            }
         }
-        let bytes = scanner.read(&path)?;
-        let actual = sha256_hex(&bytes);
-        if !actual.eq_ignore_ascii_case(expected) {
-            return Err(format!("sha256 mismatch for {filename}"));
+
+        let mut candidates: Vec<(String, Option<Value>)> = Vec::new();
+        for image in &declared {
+            let Some(filename) = str_field(image, "filename") else {
+                file_skips.push(Skipped {
+                    path: dir.join("post.json").to_string_lossy().into_owned(),
+                    reason: "image has no filename in post.json".to_string(),
+                });
+                continue;
+            };
+            if !safe_filename(filename) {
+                return Err(format!("unsafe image filename in post.json: {filename}"));
+            }
+            let path = dir.join(filename);
+            if !path.is_file() {
+                file_skips.push(Skipped {
+                    path: path.to_string_lossy().into_owned(),
+                    reason: format!("image {filename} missing"),
+                });
+                continue;
+            }
+            candidates.push((filename.to_string(), Some(image.clone())));
         }
-        panels.push(PlannedPanel {
-            id: str_field(panel, "id").unwrap_or_default().to_string(),
-            text: str_field(panel, "text").unwrap_or_default().to_string(),
-            image: PlannedImage {
-                filename: filename.to_string(),
+
+        let panel_index = panel_id
+            .strip_prefix("panel-")
+            .and_then(|suffix| suffix.parse::<usize>().ok())
+            .unwrap_or(index);
+        let mut names = vec![format!("p{panel_index}.png")];
+        for aspect in ["1:1", "9:16", "16:9"] {
+            names.push(format!("p{panel_index}-{}.png", aspect.replace(':', "x")));
+        }
+        for name in names {
+            if candidates.iter().any(|(existing, _)| existing == &name) {
+                continue;
+            }
+            if dir.join(&name).is_file() {
+                candidates.push((name, None));
+            }
+        }
+
+        let fallback = declared.first();
+        let mut images = Vec::new();
+        for (filename, declaration) in candidates {
+            let path = dir.join(&filename);
+            let bytes = match scanner.read(&path) {
+                Ok(bytes) => bytes,
+                Err(_) => {
+                    file_skips.push(Skipped {
+                        path: path.to_string_lossy().into_owned(),
+                        reason: format!("image {filename} cannot be read"),
+                    });
+                    continue;
+                }
+            };
+            let actual = sha256_hex(&bytes);
+            if let Some(expected) = declaration
+                .as_ref()
+                .and_then(|image| str_field(image, "sha256"))
+            {
+                if !actual.eq_ignore_ascii_case(expected) {
+                    file_skips.push(Skipped {
+                        path: path.to_string_lossy().into_owned(),
+                        reason: format!("sha256 mismatch for {filename}"),
+                    });
+                    continue;
+                }
+            }
+            let source = declaration.as_ref().or(fallback);
+            images.push(PlannedImage {
+                aspect: declaration
+                    .as_ref()
+                    .and_then(|image| str_field(image, "aspect"))
+                    .map(|value| value.to_string())
+                    .or_else(|| aspect_from_filename(&filename)),
+                filename,
                 sha256: actual,
                 path,
-                rendered_at: opt_str(&image_value, "rendered_at"),
-                model_id: opt_str(&image_value, "model_id"),
-                model_label: opt_str(&image_value, "model_label"),
-                prompt: opt_str(&image_value, "prompt"),
-                reference_character_ids: str_array(&image_value, "reference_character_ids"),
-                reference_names: str_array(&image_value, "reference_names"),
-            },
+                rendered_at: source.and_then(|image| opt_str(image, "rendered_at")),
+                model_id: source.and_then(|image| opt_str(image, "model_id")),
+                model_label: source.and_then(|image| opt_str(image, "model_label")),
+                prompt: source.and_then(|image| opt_str(image, "prompt")),
+                reference_character_ids: source
+                    .map(|image| str_array(image, "reference_character_ids"))
+                    .unwrap_or_default(),
+                reference_names: source
+                    .map(|image| str_array(image, "reference_names"))
+                    .unwrap_or_default(),
+            });
+        }
+        panels.push(PlannedPanel {
+            id: panel_id,
+            text: str_field(panel, "text").unwrap_or_default().to_string(),
+            images,
         });
     }
 
     let mut finals = Vec::new();
     for final_value in finals_raw {
         let aspect = str_field(final_value, "aspect")
-            .ok_or_else(|| "final has no aspect".to_string())?
+            .ok_or_else(|| "final has no aspect in post.json".to_string())?
             .to_string();
         let filename = str_field(final_value, "filename")
-            .ok_or_else(|| "final has no filename".to_string())?;
+            .ok_or_else(|| "final has no filename in post.json".to_string())?;
         if !safe_filename(filename) {
-            return Err(format!("unsafe final filename: {filename}"));
+            return Err(format!("unsafe final filename in post.json: {filename}"));
         }
         let path = dir.join(filename);
         if !path.is_file() {
-            return Err(format!("final {filename} missing"));
+            file_skips.push(Skipped {
+                path: path.to_string_lossy().into_owned(),
+                reason: format!("final {filename} missing"),
+            });
+            continue;
         }
-        let bytes = scanner.read(&path)?;
+        let Ok(bytes) = scanner.read(&path) else {
+            file_skips.push(Skipped {
+                path: path.to_string_lossy().into_owned(),
+                reason: format!("final {filename} cannot be read"),
+            });
+            continue;
+        };
         finals.push(PlannedFinal {
             aspect,
             panel_id: opt_str(final_value, "panel_id"),
@@ -341,6 +461,9 @@ fn plan_post(dir: &Path, scanner: &mut Scanner) -> Result<PlannedPost, String> {
             sha256: sha256_hex(&bytes),
         });
     }
+    if finals.is_empty() {
+        return Err("no final image in post.json".to_string());
+    }
 
     let mut hash_input = raw_bytes.clone();
     hash_input.push(0);
@@ -351,36 +474,39 @@ fn plan_post(dir: &Path, scanner: &mut Scanner) -> Result<PlannedPost, String> {
         hash_input.push(0);
     }
 
-    Ok(PlannedPost {
-        id,
-        text,
-        created_at: str_field(&raw, "created_at")
-            .ok_or_else(|| "created_at missing".to_string())?
-            .to_string(),
-        format_id: str_field(&raw, "format_id")
-            .ok_or_else(|| "format_id missing".to_string())?
-            .to_string(),
-        option_id: str_field(&raw, "option_id")
-            .ok_or_else(|| "option_id missing".to_string())?
-            .to_string(),
-        language: str_field(&raw, "language")
-            .ok_or_else(|| "language missing".to_string())?
-            .to_string(),
-        art_mode: str_field(&raw, "art_mode")
-            .unwrap_or("single")
-            .to_string(),
-        aspects: str_array(&raw, "aspects"),
-        font_id: opt_str(&raw, "font_id"),
-        character_ids: str_array(&raw, "character_ids"),
-        panels,
-        finals,
-        content_hash: sha256_hex(&hash_input),
-        raw,
-        source_dir: dir.to_path_buf(),
+    Ok(PostPlan {
+        post: PlannedPost {
+            id,
+            text,
+            created_at: str_field(&raw, "created_at")
+                .ok_or_else(|| "created_at missing in post.json".to_string())?
+                .to_string(),
+            format_id: str_field(&raw, "format_id")
+                .ok_or_else(|| "format_id missing in post.json".to_string())?
+                .to_string(),
+            option_id: str_field(&raw, "option_id")
+                .ok_or_else(|| "option_id missing in post.json".to_string())?
+                .to_string(),
+            language: str_field(&raw, "language")
+                .ok_or_else(|| "language missing in post.json".to_string())?
+                .to_string(),
+            art_mode: str_field(&raw, "art_mode")
+                .unwrap_or("single")
+                .to_string(),
+            aspects: str_array(&raw, "aspects"),
+            font_id: opt_str(&raw, "font_id"),
+            character_ids: str_array(&raw, "character_ids"),
+            panels,
+            finals,
+            content_hash: sha256_hex(&hash_input),
+            raw,
+            source_dir: dir.to_path_buf(),
+        },
+        skipped: file_skips,
     })
 }
 
-fn plan_fonts(config: &Value, cursor: &Value) -> Vec<PlannedFont> {
+fn plan_fonts(config: &Value) -> Vec<PlannedFont> {
     let presets = config
         .get("still_post_presets")
         .and_then(Value::as_array);
@@ -421,9 +547,6 @@ fn plan_fonts(config: &Value, cursor: &Value) -> Vec<PlannedFont> {
                 })
                 .unwrap_or_default();
             let weights = fonts.iter().map(|choice| choice.weight).collect();
-            let script_cursor = cursor
-                .get("cursors")
-                .and_then(|all| all.get(script.as_str()));
             PlannedFont {
                 script: script.clone(),
                 scripts: vec![script.clone()],
@@ -436,10 +559,6 @@ fn plan_fonts(config: &Value, cursor: &Value) -> Vec<PlannedFont> {
                     .unwrap_or(false),
                 fonts,
                 weights,
-                last_font_id: script_cursor.and_then(|entry| opt_str(entry, "last_font_id")),
-                last_index: script_cursor.and_then(|entry| {
-                    entry.get("last_index").and_then(Value::as_i64)
-                }),
             }
         })
         .collect()

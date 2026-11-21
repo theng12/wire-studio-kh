@@ -10,8 +10,10 @@ import zlib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1] / "src-tauri/tests/fixtures/story-channel"
-GOOD = ROOT / "still-posts/posts/post-0001"
-BAD = ROOT / "still-posts/posts/post-0002"
+POSTS = ROOT / "still-posts/posts"
+PER_SIZE = POSTS / "post-0001"
+SIMPLE = POSTS / "post-0002"
+NO_FINAL = POSTS / "post-0003"
 
 
 def png(seed, size=20):
@@ -49,18 +51,40 @@ def write(path, value):
         )
 
 
-write(GOOD / "p0.png", png("still-posts-p0"))
-write(GOOD / "final-p0-1x1.png", png("still-posts-final-1x1"))
-write(GOOD / "final-p0-9x16.png", png("still-posts-final-9x16"))
-panel_sha = hashlib.sha256((GOOD / "p0.png").read_bytes()).hexdigest()
+def image_meta(directory, filename, aspect=None):
+    meta = {
+        "filename": filename,
+        "rendered_at": "2026-11-21T01:30:00.000Z",
+        "sha256": hashlib.sha256((directory / filename).read_bytes()).hexdigest(),
+        "model_id": "fixture-model-1",
+        "model_label": "Fixture Model 1",
+        "prompt": "A quiet desk in soft morning light; no lettering.",
+        "reference_character_ids": ["char-fixture"],
+        "reference_names": ["Fixture Character"],
+    }
+    if aspect:
+        meta["aspect"] = aspect
+    return meta
+
+
+for directory, filename, seed in [
+    (PER_SIZE, "p0.png", "still-posts-p0"),
+    (PER_SIZE, "p0-1x1.png", "still-posts-p0-1x1"),
+    (PER_SIZE, "p0-9x16.png", "still-posts-p0-9x16"),
+    (PER_SIZE, "final-p0-1x1.png", "still-posts-final-1x1"),
+    (PER_SIZE, "final-p0-9x16.png", "still-posts-final-9x16"),
+    (SIMPLE, "p0.png", "still-posts-simple-p0"),
+    (SIMPLE, "final-p0-1x1.png", "still-posts-simple-final"),
+    (NO_FINAL, "p0.png", "still-posts-no-final-p0"),
+]:
+    write(directory / filename, png(seed))
 
 write(
-    GOOD / "post.json",
+    PER_SIZE / "post.json",
     {
         "id": "post-0001",
         "batch_id": "batch-20261121-FIXTURE",
         "created_at": "2026-11-21T01:02:03.000Z",
-        "updated_at": "2026-11-21T02:03:04.000Z",
         "format_id": "quiet-ink",
         "option_id": "centred-quote",
         "language": "km",
@@ -72,15 +96,10 @@ write(
                 "role": "single",
                 "text": "អានឱ្យយឺតៗ ហើយគិតមួយភ្លែត។",
                 "scene_prompt": "A quiet desk, soft morning light, no text in the image.",
-                "image": {
-                    "filename": "p0.png",
-                    "rendered_at": "2026-11-21T01:30:00.000Z",
-                    "sha256": panel_sha,
-                    "model_id": "fixture-model-1",
-                    "model_label": "Fixture Model 1",
-                    "prompt": "A quiet desk in soft morning light; no lettering.",
-                    "reference_character_ids": ["char-fixture"],
-                    "reference_names": ["Fixture Character"],
+                "image": image_meta(PER_SIZE, "p0.png"),
+                "images": {
+                    "1:1": image_meta(PER_SIZE, "p0-1x1.png", "1:1"),
+                    "9:16": image_meta(PER_SIZE, "p0-9x16.png", "9:16"),
                 },
             }
         ],
@@ -105,14 +124,14 @@ write(
             },
         ],
         "aspects": ["1:1", "9:16"],
-        "art_mode": "single",
+        "art_mode": "per-size",
         "font_id": "kantumruy-pro",
         "published_at": None,
     },
 )
 
 write(
-    BAD / "post.json",
+    SIMPLE / "post.json",
     {
         "id": "post-0002",
         "batch_id": "batch-20261121-FIXTURE",
@@ -120,12 +139,12 @@ write(
         "format_id": "quiet-ink",
         "option_id": "centred-quote",
         "language": "km",
-        "caption": "រូបភាពនេះបាត់ហើយ។",
+        "caption": "ថ្ងៃនេះ សូមឈប់មួយភ្លែត។",
         "panels": [
             {
                 "id": "panel-0",
-                "text": "រូបភាពនេះបាត់ហើយ។",
-                "image": {"filename": "p0.png", "sha256": "0" * 64},
+                "text": "ឈប់មួយភ្លែត ហើយដកដង្ហើមធំ។",
+                "image": image_meta(SIMPLE, "p0.png"),
             }
         ],
         "finals": [
@@ -133,11 +152,34 @@ write(
                 "aspect": "1:1",
                 "panel_id": "panel-0",
                 "filename": "final-p0-1x1.png",
-                "text": "រូបភាពនេះបាត់ហើយ។",
-                "style_hash": "style-fixture-missing",
+                "text": "ឈប់មួយភ្លែត ហើយដកដង្ហើមធំ។",
+                "style_hash": "style-fixture-simple",
                 "font_id": "kantumruy-pro",
             }
         ],
+        "aspects": ["1:1"],
+        "font_id": "kantumruy-pro",
+    },
+)
+
+write(
+    NO_FINAL / "post.json",
+    {
+        "id": "post-0003",
+        "batch_id": "batch-20261121-FIXTURE",
+        "created_at": "2026-11-21T04:00:00.000Z",
+        "format_id": "quiet-ink",
+        "option_id": "centred-quote",
+        "language": "km",
+        "caption": "គ្មានរូបចុងក្រោយទេ។",
+        "panels": [
+            {
+                "id": "panel-0",
+                "text": "គ្មានរូបចុងក្រោយទេ។",
+                "image": image_meta(NO_FINAL, "p0.png"),
+            }
+        ],
+        "finals": [],
         "aspects": ["1:1"],
         "font_id": "kantumruy-pro",
     },
@@ -195,14 +237,9 @@ write(
     },
 )
 
-write(
-    ROOT / "still-posts/font-pool-cursor.json",
-    {
-        "cursors": {
-            "latn": {"last_font_id": "inter", "last_index": 0},
-            "khmr": {"last_font_id": "kantumruy-pro", "last_index": 0},
-        }
-    },
-)
+# Production has no font-pool cursor file; do not ship one in the fixture.
+cursor = ROOT / "still-posts/font-pool-cursor.json"
+if cursor.exists():
+    cursor.unlink()
 
 print(f"wrote {ROOT}")
