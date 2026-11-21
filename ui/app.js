@@ -20,6 +20,7 @@
     composer: { eyebrow: 'Compose', title: 'Composer', subtitle: 'Write a text post, choose where it goes, and send it now or later.' },
     queue: { eyebrow: 'Dispatch', title: 'Queue', subtitle: 'One row per target. Retry or cancel a delivery and see the reason.' },
     targets: { eyebrow: 'Connections', title: 'Targets', subtitle: 'Connect a Telegram bot and choose the channel it posts to.' },
+    import: { eyebrow: 'Still Posts', title: 'Import Still Posts', subtitle: 'Copies posts and images from a Story Studio KH channel into Wire. Story is never changed.' },
     settings: { eyebrow: 'Preferences', title: 'Settings', subtitle: 'App paths, connections, updates, appearance and about.' }
   };
   const STATE_LEVEL = {
@@ -42,6 +43,8 @@
   let queueLayout = 'table';
   let dialogSeq = 0;
   const dialogStack = [];
+  let importPreview = null;
+  let importBusy = null;
 
   const tauriBridge = window.__TAURI__ || null;
   const tauriInvoke = tauriBridge && (tauriBridge.core && tauriBridge.core.invoke || tauriBridge.invoke);
@@ -92,6 +95,93 @@
   }
 
   function message(err) { return err && err.message ? err.message : String(err || 'Unknown error'); }
+
+  function pickField(source, ...keys) {
+    for (const key of keys) if (source && source[key] !== undefined && source[key] !== null) return source[key];
+    return null;
+  }
+
+  function countOf(value) {
+    if (Array.isArray(value)) return value.length;
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim() && Number.isFinite(Number(value))) return Number(value);
+    return null;
+  }
+
+  function textOf(value) {
+    return value === null || value === undefined || value === '' ? 'Not reported' : String(value);
+  }
+
+  function bytesText(value) {
+    if (value === null || value === undefined) return 'Not reported';
+    if (typeof value === 'number' && Number.isFinite(value)) return new Intl.NumberFormat().format(value) + ' bytes';
+    return String(value);
+  }
+
+  function readImportData(raw) {
+    let data = raw;
+    if (typeof data === 'string') {
+      try { data = JSON.parse(data); } catch (_) { throw new Error('The core did not return a readable report.'); }
+    }
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('The core did not return a readable report.');
+    return [data.report, data.summary, data].reduce(
+      (merged, part) => part && typeof part === 'object' && !Array.isArray(part) ? Object.assign(merged, part) : merged, {});
+  }
+
+  function normalizeSkipped(value) {
+    if (!Array.isArray(value)) return [];
+    return value.map(item => typeof item === 'string'
+      ? { label: item, reason: 'Reason not reported' }
+      : {
+        label: textOf(pickField(item, 'path', 'file', 'name', 'id', 'item')),
+        reason: textOf(pickField(item, 'reason', 'detail', 'error', 'message'))
+      });
+  }
+
+  function normalizePreview(raw) {
+    const data = readImportData(raw);
+    const postsRaw = pickField(data, 'posts', 'items');
+    const skippedRaw = pickField(data, 'skipped', 'skips');
+    const posts = Array.isArray(postsRaw) ? postsRaw.map(post => {
+      const row = post && typeof post === 'object' ? post : { id: post };
+      return {
+        id: textOf(pickField(row, 'id', 'post_id', 'postId')),
+        caption: String(pickField(row, 'caption', 'text') || ''),
+        aspects: textOf(pickField(row, 'aspects', 'aspect')),
+        finals: countOf(pickField(row, 'finals', 'finals_count', 'finalCount'))
+      };
+    }) : [];
+    return {
+      channel: textOf(pickField(data, 'channel_name', 'channelName', 'channel', 'name')),
+      posts,
+      postsCount: countOf(pickField(data, 'post_count', 'postCount', 'posts_count')) ?? (Array.isArray(postsRaw) ? posts.length : null),
+      fontsCount: countOf(pickField(data, 'fonts', 'font_count', 'fontCount')),
+      skipped: normalizeSkipped(skippedRaw),
+      skippedCount: countOf(pickField(data, 'skipped_count', 'skippedCount')) ?? (Array.isArray(skippedRaw) ? skippedRaw.length : null),
+      filesRead: countOf(pickField(data, 'files_read', 'filesRead', 'read_files')),
+      imageCount: countOf(pickField(data, 'images', 'image_count', 'imageCount', 'image_files', 'imageFiles', 'files_to_copy', 'filesToCopy'))
+    };
+  }
+
+  function boolOf(value) {
+    if (typeof value === 'boolean') return value;
+    const text = value === null || value === undefined ? '' : String(value).toLowerCase().trim();
+    if (['yes', 'true', '1', 'unchanged'].includes(text)) return true;
+    if (['no', 'false', '0', 'changed'].includes(text)) return false;
+    return null;
+  }
+
+  function normalizeImportReport(raw) {
+    const data = readImportData(raw);
+    return {
+      imported: countOf(pickField(data, 'imported', 'imported_posts', 'posts_imported', 'postsImported')) ?? (Array.isArray(data.posts) ? data.posts.length : null),
+      filesCopied: countOf(pickField(data, 'files_copied', 'copied_files', 'filesCopied')),
+      bytes: pickField(data, 'bytes', 'bytes_copied', 'bytesCopied', 'total_bytes'),
+      alreadyPresent: countOf(pickField(data, 'already_present', 'alreadyPresent', 'existing')),
+      skipped: normalizeSkipped(pickField(data, 'skipped', 'skips')),
+      unchanged: boolOf(pickField(data, 'story_files_unchanged', 'storyFilesUnchanged', 'unchanged', 'source_unchanged', 'sourceUnchanged'))
+    };
+  }
 
   /* ---------- Core contract ---------- */
 
@@ -433,6 +523,235 @@
     });
   }
 
+  /* ---------- Still Posts import ---------- */
+
+  function importChip(label, value, level = 'off') {
+    return el('span', { class: 'chip', 'data-level': level, text: label + ': ' + textOf(value) });
+  }
+
+  function captionExcerpt(text) { return text.length > 80 ? text.slice(0, 79) + '…' : text; }
+
+  function skippedBlock(items) {
+    if (!items.length) return null;
+    const list = el('ul', { class: 'dialog-list' });
+    items.forEach(item => list.append(el('li', {},
+      el('span', { class: 'row-title', text: item.label }), ' — ', item.reason)));
+    return el('div', { class: 'import-skipped' }, el('h3', { text: 'Skipped' }), list);
+  }
+
+  function reportStat(label, value) {
+    return el('div', {}, el('span', { text: label }), el('strong', { text: textOf(value) }));
+  }
+
+  function renderImportEmpty() {
+    $('#importResultsTitle').textContent = 'Preview';
+    $('#importRootHint').textContent = 'No folder checked';
+    $('#importResults').replaceChildren(stateBlock('empty', 'Nothing to preview', 'Choose the channel folder to see what would come in.'));
+  }
+
+  function renderImportError(title, detail, retry) {
+    $('#importResultsTitle').textContent = title;
+    $('#importResults').replaceChildren(stateBlock('error', title, detail, 'Retry', retry));
+  }
+
+  function renderImportPreview(preview, root) {
+    $('#importResultsTitle').textContent = 'Preview';
+    $('#importRootHint').textContent = root;
+    const parts = [el('div', { class: 'import-chips' },
+      importChip('Channel', preview.channel, 'info'),
+      importChip('Posts', textOf(preview.postsCount), 'live'),
+      importChip('Fonts', textOf(preview.fontsCount)),
+      importChip('Skipped', textOf(preview.skippedCount)),
+      importChip('Files read', textOf(preview.filesRead))
+    )];
+    if (preview.posts.length) {
+      const body = el('tbody');
+      preview.posts.forEach(post => body.append(el('tr', {},
+        el('td', { class: 'mono', text: post.id }),
+        el('td', { class: 'excerpt', title: post.caption, text: captionExcerpt(post.caption) }),
+        el('td', { text: post.aspects }),
+        el('td', { text: textOf(post.finals) })
+      )));
+      parts.push(el('div', { class: 'table-wrap' }, el('table', {},
+        el('thead', {}, el('tr', {}, el('th', { text: 'Post' }), el('th', { text: 'Caption' }),
+          el('th', { text: 'Aspects' }), el('th', { text: 'Finals' }))), body)));
+    } else {
+      parts.push(stateBlock('empty', 'No posts found', 'The core reported no importable Still Posts in this folder.'));
+    }
+    const skipped = skippedBlock(preview.skipped);
+    if (skipped) parts.push(skipped);
+    $('#importResults').replaceChildren(...parts);
+  }
+
+  function renderImportReport(report, root) {
+    $('#importResultsTitle').textContent = 'Import report';
+    $('#importRootHint').textContent = root;
+    const flag = report.unchanged === false ? 'no' : report.unchanged === true ? 'yes' : 'not reported';
+    const level = report.unchanged === false ? 'bad' : report.unchanged === true ? 'ok' : 'warn';
+    const parts = [
+      el('div', { class: 'queue-meta' },
+        reportStat('Imported', textOf(report.imported)),
+        reportStat('Files copied', textOf(report.filesCopied)),
+        reportStat('Bytes', bytesText(report.bytes)),
+        reportStat('Already present', textOf(report.alreadyPresent))
+      ),
+      el('p', { class: 'import-flag', 'data-level': level, text: 'Story files unchanged: ' + flag })
+    ];
+    const skipped = skippedBlock(report.skipped);
+    if (skipped) parts.push(skipped);
+    $('#importResults').replaceChildren(...parts);
+  }
+
+  function syncImportButtons() {
+    const busy = importBusy !== null;
+    const check = $('#importCheckBtn');
+    const run = $('#importRunBtn');
+    check.disabled = busy;
+    check.textContent = importBusy === 'check' ? 'Checking…' : 'Check folder';
+    $('#importChooseBtn').disabled = busy;
+    $('#importRoot').disabled = busy;
+    run.disabled = busy || !importPreview;
+    run.textContent = importBusy === 'run' ? 'Importing…'
+      : importPreview && importPreview.postsCount !== null ? 'Import ' + importPreview.postsCount + ' posts' : 'Import posts';
+  }
+
+  function showImportError(text) { const node = $('#importError'); node.textContent = text; node.hidden = false; }
+  function clearImportError() { const node = $('#importError'); node.textContent = ''; node.hidden = true; }
+
+  function invalidateImportPreview() {
+    importPreview = null;
+    renderImportEmpty();
+    syncImportButtons();
+  }
+
+  function parentOf(path) {
+    const clean = String(path || '').replace(/\/+$/, '') || '/';
+    if (clean === '/' || !clean.includes('/')) return null;
+    return clean.slice(0, clean.lastIndexOf('/')) || '/';
+  }
+
+  function normalizeDirs(raw) {
+    const list = Array.isArray(raw) ? raw : pickField(raw, 'dirs', 'directories', 'folders', 'entries', 'children');
+    if (!Array.isArray(list)) throw new Error('The core did not return a folder list.');
+    return list.map(item => {
+      if (typeof item === 'string') return { name: item.split('/').filter(Boolean).pop() || item, path: item, dir: true };
+      const path = String(pickField(item, 'path', 'full_path', 'fullPath') || '');
+      const name = String(pickField(item, 'name', 'label') || path.split('/').filter(Boolean).pop() || path);
+      const flag = pickField(item, 'is_dir', 'isDir', 'isDirectory');
+      const type = String(pickField(item, 'type', 'kind') || '').toLowerCase();
+      const dir = flag !== null ? flag === true || String(flag).toLowerCase() === 'true'
+        : type ? ['dir', 'directory', 'folder'].includes(type) : true;
+      return { name, path: path || name, dir };
+    }).filter(entry => entry.path && entry.dir);
+  }
+
+  function openFolderBrowser() {
+    let current = $('#importRoot').value.trim() || '/';
+    const pathNode = el('p', { class: 'mono dir-path', id: 'importDirPath' });
+    const listNode = el('div', { class: 'folder-list', id: 'importDirList', tabindex: '0' });
+    const dialog = openDialog({
+      title: 'Choose a channel folder',
+      meta: 'Browsing never changes Story. Pick a channel folder, then use it.',
+      body: el('div', {}, pathNode, listNode),
+      confirmLabel: 'Use this folder', cancelLabel: 'Cancel',
+      initialFocus: '#importDirList',
+      onConfirm: () => {
+        $('#importRoot').value = current;
+        clearImportError();
+        invalidateImportPreview();
+        setStatus('Folder selected', 'info');
+      }
+    });
+    dialog.primary.disabled = true;
+
+    function row(label, target, withIcon) {
+      const button = el('button', { class: 'folder-row', type: 'button', on: {
+        click: () => load(target),
+        keydown: event => {
+          if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); load(target); }
+        }
+      } });
+      if (withIcon) button.append(icon('folder'));
+      button.append(el('span', { text: label }));
+      return button;
+    }
+
+    async function load(path) {
+      current = path;
+      pathNode.textContent = path;
+      listNode.replaceChildren(el('p', { class: 'help', text: 'Reading folders…' }));
+      try {
+        const dirs = normalizeDirs(await callCore('list_dirs', { path }));
+        if (!dialog.overlay.isConnected) return;
+        listNode.replaceChildren();
+        const parent = parentOf(path);
+        if (parent) listNode.append(row('Up', parent, false));
+        dirs.forEach(dir => listNode.append(row(dir.name, dir.path, true)));
+        if (!dirs.length && !parent) listNode.append(el('p', { class: 'help', text: 'No subfolders reported here.' }));
+        dialog.primary.disabled = false;
+      } catch (err) {
+        if (!dialog.overlay.isConnected) return;
+        listNode.replaceChildren(
+          el('p', { class: 'help', text: 'Could not read folders: ' + message(err) }),
+          el('button', { class: 'mini-button', type: 'button', text: 'Retry', on: { click: () => load(path) } })
+        );
+        dialog.primary.disabled = false;
+      }
+    }
+    load(current);
+  }
+
+  async function checkFolder() {
+    const root = $('#importRoot').value.trim();
+    if (!root) { showImportError('Choose the channel folder first.'); $('#importRoot').focus(); return; }
+    clearImportError();
+    importBusy = 'check';
+    syncImportButtons();
+    setStatus('Checking Story folder…', 'info');
+    try {
+      importPreview = normalizePreview(await callCore('story_import_preview', { root }));
+      renderImportPreview(importPreview, root);
+      setStatus('Preview ready', 'ok');
+    } catch (err) {
+      importPreview = null;
+      renderImportError('Preview failed', message(err), checkFolder);
+      setStatus('Preview failed', 'bad');
+    } finally {
+      importBusy = null;
+      syncImportButtons();
+    }
+  }
+
+  function confirmImport() {
+    if (!importPreview || importBusy) return;
+    const posts = importPreview.postsCount;
+    const images = importPreview.imageCount;
+    const body = posts !== null && images !== null
+      ? 'Import ' + posts + ' posts and ' + images + ' images? Story\'s files stay where they are.'
+      : posts !== null
+        ? 'Import ' + posts + ' posts and their images? Story\'s files stay where they are.'
+        : 'Import these posts and images? Story\'s files stay where they are.';
+    openDialog({ title: 'Confirm import', body, confirmLabel: 'Import', cancelLabel: 'Cancel', onConfirm: runImport });
+  }
+
+  async function runImport() {
+    if (!importPreview || importBusy) return;
+    const root = $('#importRoot').value.trim();
+    importBusy = 'run';
+    syncImportButtons();
+    setStatus('Importing Still Posts…', 'info');
+    try {
+      renderImportReport(normalizeImportReport(await callCore('story_import_run', { root })), root);
+      setStatus('Import finished', 'ok');
+    } catch (err) {
+      renderImportError('Import failed', message(err), confirmImport);
+      setStatus('Import failed', 'bad');
+    } finally {
+      importBusy = null;
+      syncImportButtons();
+    }
+  }
+
   /* ---------- Dialogs ---------- */
 
   function dialogError(panel, text) {
@@ -708,6 +1027,13 @@
     $('#queueTableBtn').addEventListener('click', () => setQueueLayout('table'));
     $('#queueCardsBtn').addEventListener('click', () => setQueueLayout('cards'));
     $('#telegramManageBtn').addEventListener('click', openTokenDialog);
+    $('#importRoot').addEventListener('input', () => { clearImportError(); invalidateImportPreview(); });
+    $('#importRoot').addEventListener('keydown', event => {
+      if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey && !event.altKey) { event.preventDefault(); checkFolder(); }
+    });
+    $('#importChooseBtn').addEventListener('click', openFolderBrowser);
+    $('#importCheckBtn').addEventListener('click', checkFolder);
+    $('#importRunBtn').addEventListener('click', confirmImport);
     $('#telegramSaveChatBtn').addEventListener('click', () => {
       saveTelegram('', $('#telegramChatId').value.trim())
         .catch(err => openDialog({ title: 'Channel not saved', body: message(err), confirmLabel: 'Close', cancelLabel: null }));
@@ -741,6 +1067,7 @@
         event.preventDefault();
         showSection(['composer', 'queue', 'targets', 'settings'][Number(key) - 1]);
       }
+      else if (key === '5') { event.preventDefault(); showSection('import'); }
       else if (key === ',') { event.preventDefault(); showSection('settings'); }
       else if (key === 'k') { event.preventDefault(); showSection('queue'); $('#queueSearch').focus(); $('#queueSearch').select(); }
       else if (key === 'enter' && activeSection === 'composer') { event.preventDefault(); queuePost(); }
@@ -755,6 +1082,8 @@
     $('#queueTableBtn').setAttribute('aria-pressed', String(queueLayout === 'table'));
     $('#queueCardsBtn').setAttribute('aria-pressed', String(queueLayout === 'cards'));
     wireEvents();
+    renderImportEmpty();
+    syncImportButtons();
     showSection('composer');
     handleWhatsNewOnLaunch();
     refreshState();

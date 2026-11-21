@@ -247,6 +247,22 @@ tbody tr:last-child td { border-bottom: 0; }
 .path-field { display: flex; gap: var(--sp-2); width: min(420px, 100%); }
 .path-field input { min-width: 0; }
 
+/* Still Posts import */
+.import-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: var(--sp-4); }
+.folder-list { display: grid; gap: var(--sp-1); max-height: 280px; overflow: auto; }
+.dir-path { margin: 0 0 var(--sp-3); overflow-wrap: anywhere; color: var(--muted); }
+.folder-row { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: 34px; padding: var(--sp-2) 10px; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--panel); text-align: left; }
+.folder-row:hover { background: var(--panel-2); }
+.folder-row .icon { color: var(--muted); }
+.import-skipped { margin-top: var(--sp-4); padding: var(--sp-3) var(--sp-4); background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r-card); }
+.import-skipped h3 { margin: 0 0 var(--sp-2); font-size: 13px; }
+.import-skipped ul { margin: 0; padding-left: 18px; color: var(--muted); }
+.import-skipped li { margin-bottom: var(--sp-1); }
+.import-flag { margin: var(--sp-4) 0 0; font-weight: 600; }
+.import-flag[data-level="bad"] { color: var(--bad); }
+.import-flag[data-level="ok"] { color: var(--ok); }
+.import-flag[data-level="warn"] { color: var(--warn); }
+
 /* Dialogs */
 .dialog-layer { position: relative; z-index: 50; }
 .dialog-overlay { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: var(--sp-5); background: rgba(20, 17, 14, .45); }
