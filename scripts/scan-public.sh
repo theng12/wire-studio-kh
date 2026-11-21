@@ -18,18 +18,23 @@ FORBIDDEN = [
     (re.compile(rb"/Users/[^/\x00\s\x22\x27]+"), "absolute user path"),
     (re.compile(rb"[A-Za-z0-9-]+\.ts\.net"), "tailnet hostname"),
     (re.compile(rb"\bterranash-[A-Za-z0-9-]+"), "host name"),
-    (re.compile(rb"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), "email address"),
+    (re.compile(rb"[A-Za-z0-9._%+-]+@(?!.*\.(?:png|jpg|jpeg|gif|svg|icns))[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), "email address"),
     (re.compile(rb"bot[0-9]{8,}:[A-Za-z0-9_-]{30,}"), "telegram bot token"),
     (re.compile(rb"ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"), "github token"),
     (re.compile(rb"tskey-[A-Za-z0-9-]{20,}"), "tailscale key"),
     (re.compile(rb"AKIA[0-9A-Z]{16}"), "aws key"),
     (re.compile(rb"BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY"), "private key"),
 ]
+# Third-party contacts that are licence or CA data, not personal details.
+# Each one is reviewed by name; never add a domain, only an exact address.
+THIRD_PARTY = {b"appro@openssl.org", b"info@e-szigno.hu"}
 hits = []
 for path in sys.argv[1:]:
     data = open(path, "rb").read()
     for rx, label in FORBIDDEN:
         for m in rx.finditer(data):
+            if label == "email address" and m.group() in THIRD_PARTY:
+                continue
             hits.append((path, label, m.start(), m.group()[:60]))
     # "terranash" is allowed only when the four bytes before it are "com."
     start = 0
@@ -70,6 +75,8 @@ self_test() {
   printf 'terranash-1301-m1-16-1000' > "$dir/bad_host"
   printf 'someone@example.com' > "$dir/bad_email"
   printf 'com.terranash.wirestudiokh' > "$dir/good_bundle"
+  printf '128x128@2x.pngicons' > "$dir/good_icon"
+  printf 'appro@openssl.org' > "$dir/good_third_party"
   local rc_bad=0 rc_good=1
   python3 -I -c "$scan_python" "$dir/bad_path" >/dev/null 2>&1 || rc_bad=$?
   python3 -I -c "$scan_python" "$dir/good_bundle" >/dev/null 2>&1; rc_good=$?
@@ -78,6 +85,8 @@ self_test() {
   python3 -I -c "$scan_python" "$dir/bad_host" >/dev/null 2>&1 && { echo "FAIL synthetic hostname was not caught"; ok=0; } || echo "PASS synthetic hostname is caught"
   python3 -I -c "$scan_python" "$dir/bad_email" >/dev/null 2>&1 && { echo "FAIL synthetic email was not caught"; ok=0; } || echo "PASS synthetic email is caught"
   [ "$rc_good" -eq 0 ] && echo "PASS com.terranash.wirestudiokh is allowed" || { echo "FAIL bundle id was refused"; ok=0; }
+  python3 -I -c "$scan_python" "$dir/good_icon" >/dev/null 2>&1 && echo "PASS icon filename 128x128@2x.png is not read as an email" || { echo "FAIL icon filename misread as an email"; ok=0; }
+  python3 -I -c "$scan_python" "$dir/good_third_party" >/dev/null 2>&1 && echo "PASS a reviewed third-party licence contact is allowed" || { echo "FAIL reviewed third-party contact refused"; ok=0; }
   rm -rf "$dir"
   [ "$ok" -eq 1 ]
 }
