@@ -142,3 +142,52 @@ pub fn save_appearance(s: State<'_, Shared>, choice: String) -> Result<(), Strin
 pub async fn check_updates() -> Result<feedcheck::UpdateState, String> {
     Ok(feedcheck::check(env!("CARGO_PKG_VERSION")).await)
 }
+
+/// The in-app folder browser behind every path field's Choose… button.
+#[tauri::command]
+pub fn list_dirs(path: Option<String>) -> Result<serde_json::Value, String> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/".into());
+    let start = path
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(&home));
+    let start = start.canonicalize().unwrap_or(start);
+    let mut dirs = Vec::new();
+    let entries = std::fs::read_dir(&start).map_err(|e| format!("Cannot open {}: {e}", start.display()))?;
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.is_dir() {
+            if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                dirs.push(serde_json::json!({ "name": name, "path": p.display().to_string() }));
+            }
+        }
+    }
+    dirs.sort_by(|a, b| a["name"].as_str().unwrap_or("").cmp(b["name"].as_str().unwrap_or("")));
+    Ok(serde_json::json!({
+        "path": start.display().to_string(),
+        "parent": start.parent().map(|p| p.display().to_string()),
+        "dirs": dirs,
+    }))
+}
+
+/// Read-only preview of a Story channel's Still Posts. Nothing is written.
+#[tauri::command]
+pub fn story_import_preview(root: String) -> Result<serde_json::Value, String> {
+    let plan = crate::import::plan::scan(std::path::Path::new(&root))?;
+    let summary = serde_json::json!({
+        "channel": plan.channel_slug,
+        "name": plan.channel_name,
+        "posts": plan.posts.len(),
+        "fonts": plan.fonts.len(),
+        "skipped": plan.skipped.len(),
+        "files_read": plan.source_files,
+    });
+    Ok(serde_json::json!({ "summary": summary, "plan": plan }))
+}
+
+/// Copies what the preview listed into Wire's data dir. Re-runs skip what landed.
+#[tauri::command]
+pub fn story_import_run(s: State<'_, Shared>, root: String) -> Result<serde_json::Value, String> {
+    let plan = crate::import::plan::scan(std::path::Path::new(&root))?;
+    let report = crate::import::apply::apply(&plan, &s.data_dir)?;
+    Ok(serde_json::json!({ "report": report }))
+}

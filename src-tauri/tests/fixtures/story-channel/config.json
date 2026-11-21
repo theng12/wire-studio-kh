@@ -1,0 +1,65 @@
+{
+  "still_post_last_preset": "quiet-ink",
+  "still_post_presets": [
+    {
+      "id": "quiet-ink",
+      "name": "Quiet ink",
+      "data": {
+        "font_pools": {
+          "latn": {
+            "usage_mode": "serial",
+            "allow_repeat": false,
+            "fonts": [
+              {
+                "font_id": "inter",
+                "weight": 1
+              },
+              {
+                "font_id": "noto-sans",
+                "weight": 2
+              }
+            ]
+          },
+          "khmr": {
+            "usage_mode": "weighted",
+            "allow_repeat": true,
+            "fonts": [
+              {
+                "font_id": "kantumruy-pro",
+                "weight": 3
+              },
+              {
+                "font_id": "noto-sans-khmer",
+                "weight": 1
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "bold-ink",
+      "name": "Bold ink",
+      "data": {
+        "font_pools": {
+          "latn": {
+            "usage_mode": "weighted",
+            "allow_repeat": true,
+            "fonts": [
+              {
+                "font_id": "inter-bold",
+                "weight": 1
+              }
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "still_posts": {
+    "character_ids": [
+      "char-fixture"
+    ],
+    "handle": "@fixture"
+  }
+}

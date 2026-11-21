@@ -1,0 +1,62 @@
+{
+  "id": "post-0001",
+  "batch_id": "batch-20261121-FIXTURE",
+  "created_at": "2026-11-21T01:02:03.000Z",
+  "updated_at": "2026-11-21T02:03:04.000Z",
+  "format_id": "quiet-ink",
+  "option_id": "centred-quote",
+  "language": "km",
+  "character_ids": [
+    "char-fixture"
+  ],
+  "caption": "ចំណេះដឹងតូចមួយ សម្រាប់ថ្ងៃនេះ។",
+  "panels": [
+    {
+      "id": "panel-0",
+      "role": "single",
+      "text": "អានឱ្យយឺតៗ ហើយគិតមួយភ្លែត។",
+      "scene_prompt": "A quiet desk, soft morning light, no text in the image.",
+      "image": {
+        "filename": "p0.png",
+        "rendered_at": "2026-11-21T01:30:00.000Z",
+        "sha256": "b636f79bd55a6d0c351c9e6e869759289352b7d1c47914539ae3e3d7e3dac5bc",
+        "model_id": "fixture-model-1",
+        "model_label": "Fixture Model 1",
+        "prompt": "A quiet desk in soft morning light; no lettering.",
+        "reference_character_ids": [
+          "char-fixture"
+        ],
+        "reference_names": [
+          "Fixture Character"
+        ]
+      }
+    }
+  ],
+  "finals": [
+    {
+      "aspect": "1:1",
+      "panel_id": "panel-0",
+      "filename": "final-p0-1x1.png",
+      "rendered_at": "2026-11-21T01:40:00.000Z",
+      "text": "អានឱ្យយឺតៗ ហើយគិតមួយភ្លែត។",
+      "style_hash": "style-fixture-1x1",
+      "font_id": "kantumruy-pro"
+    },
+    {
+      "aspect": "9:16",
+      "panel_id": "panel-0",
+      "filename": "final-p0-9x16.png",
+      "rendered_at": "2026-11-21T01:41:00.000Z",
+      "text": "អានឱ្យយឺតៗ ហើយគិតមួយភ្លែត។",
+      "style_hash": "style-fixture-9x16",
+      "font_id": "kantumruy-pro"
+    }
+  ],
+  "aspects": [
+    "1:1",
+    "9:16"
+  ],
+  "art_mode": "single",
+  "font_id": "kantumruy-pro",
+  "published_at": null
+}

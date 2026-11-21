@@ -266,6 +266,36 @@ fn telegram_fields(payload: &Value) -> Result<(String, String), &'static str> {
 }
 
 /// Same secrets and settings helpers as `commands::save_telegram`, without a Tauri window.
+/// The agent-friendly equivalent of the import screen: preview or run, same
+/// guards, same code path as the Tauri commands.
+fn import_channel(state: &AppState, payload: Value) -> (u16, Value) {
+    let Some(root) = payload.get("root").and_then(Value::as_str).map(str::to_string) else {
+        return (400, json!({ "ok": false, "error": "root required" }));
+    };
+    let apply = payload.get("apply").and_then(Value::as_bool).unwrap_or(true);
+    let plan = match crate::import::plan::scan(std::path::Path::new(&root)) {
+        Ok(plan) => plan,
+        Err(error) => return (400, json!({ "ok": false, "error": error })),
+    };
+    if !apply {
+        return (
+            200,
+            json!({
+                "ok": true,
+                "applied": false,
+                "channel": plan.channel_slug,
+                "posts": plan.posts.len(),
+                "fonts": plan.fonts.len(),
+                "skipped": plan.skipped,
+            }),
+        );
+    }
+    match crate::import::apply::apply(&plan, &state.data_dir) {
+        Ok(report) => (200, json!({ "ok": true, "applied": true, "report": report })),
+        Err(error) => (400, json!({ "ok": false, "error": error })),
+    }
+}
+
 fn save_telegram(state: &AppState, payload: Value) -> (u16, Value) {
     let (token, chat) = match telegram_fields(&payload) {
         Ok(fields) => fields,
@@ -323,6 +353,7 @@ pub fn serve(state: Shared, port: u16) -> Result<(), String> {
             ("POST", "/api/test/trigger/cancel") => "cancel",
             ("POST", "/api/test/trigger/retry") => "retry",
             ("POST", "/api/test/trigger/save-telegram") => "save-telegram",
+            ("POST", "/api/test/trigger/import") => "import",
             _ => {
                 let reason = format!("unknown route: {} {}", method.as_str(), path.as_str());
                 respond(request, 404, json!({ "ok": false, "error": reason }));
@@ -351,6 +382,7 @@ pub fn serve(state: Shared, port: u16) -> Result<(), String> {
             "schedule" => schedule(&state, payload),
             "cancel" => trigger(&state, payload, false),
             "save-telegram" => save_telegram(&state, payload),
+            "import" => import_channel(&state, payload),
             _ => trigger(&state, payload, true),
         };
         respond(request, status, reply);

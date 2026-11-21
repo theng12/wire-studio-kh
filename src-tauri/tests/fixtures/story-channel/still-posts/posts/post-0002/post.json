@@ -1,0 +1,33 @@
+{
+  "id": "post-0002",
+  "batch_id": "batch-20261121-FIXTURE",
+  "created_at": "2026-11-21T03:00:00.000Z",
+  "format_id": "quiet-ink",
+  "option_id": "centred-quote",
+  "language": "km",
+  "caption": "រូបភាពនេះបាត់ហើយ។",
+  "panels": [
+    {
+      "id": "panel-0",
+      "text": "រូបភាពនេះបាត់ហើយ។",
+      "image": {
+        "filename": "p0.png",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    }
+  ],
+  "finals": [
+    {
+      "aspect": "1:1",
+      "panel_id": "panel-0",
+      "filename": "final-p0-1x1.png",
+      "text": "រូបភាពនេះបាត់ហើយ។",
+      "style_hash": "style-fixture-missing",
+      "font_id": "kantumruy-pro"
+    }
+  ],
+  "aspects": [
+    "1:1"
+  ],
+  "font_id": "kantumruy-pro"
+}

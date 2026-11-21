@@ -6,6 +6,7 @@ pub mod dispatch;
 pub mod feedcheck;
 pub mod gateway;
 pub mod hold;
+pub mod import;
 pub mod queue;
 pub mod secrets;
 pub mod settings;
@@ -97,6 +98,9 @@ pub fn run_app() {
             commands::save_telegram,
             commands::save_appearance,
             commands::check_updates,
+            commands::story_import_preview,
+            commands::story_import_run,
+            commands::list_dirs,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Wire Studio KH");
