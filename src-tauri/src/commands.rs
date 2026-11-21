@@ -72,6 +72,7 @@ pub fn state(s: State<'_, Shared>) -> Result<serde_json::Value, String> {
                 "label": p.label,
                 "ratio": p.ratio,
                 "max_text_length": p.max_text_length,
+                "media": p.media,
             })
         })
         .collect();

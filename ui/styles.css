@@ -258,6 +258,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .queue-table th:nth-child(4), .queue-table td:nth-child(4) { width: 184px; padding-left: var(--sp-2); padding-right: var(--sp-2); }
 .when { display: grid; gap: 2px; }
 .when .cell-note { margin-top: 0; }
+.row-actions-wrap { display: grid; gap: 4px; }
 .row-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .mini-button { display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 4px 9px; border: 1px solid var(--line); border-radius: var(--r-control); background: var(--panel); font-size: 12px; }
 .mini-button:hover:not(:disabled) { background: var(--panel-2); }

@@ -2,12 +2,12 @@
 
 (() => {
   // Fallback only: the core reports the real version and applyVersion() uses it.
-  let APP_VERSION = '0.4.1';
+  let APP_VERSION = '0.4.2';
   const WHATS_NEW = [
-    'Every destination is named the way you see it on Targets — "YouTube", "Facebook Page", "Telegram — Wire Smoke Test" — never an internal id.',
-    'The Queue is shorter: a post takes the room it needs, and the next attempt sits in two short lines under the state.',
-    'Internal words are gone from the screens: no core, no bridge, no feed — plain sentences instead.',
-    'A button you cannot use now looks disabled and says why.'
+    'Destinations carry their names — "Wire Smoke Test", "YouTube channel" — and never an internal id.',
+    'The Composer says what it really does: one caption, text only for now, with video and image posts in a later build.',
+    'A greyed-out Retry or Cancel now says why on the row itself, for example "sent, nothing to retry".',
+    'The Browse… button is gone until choosing a folder actually works.'
   ];
   const SUPPORT_URL = 'https://nowpayments.io/donation/studiokh';
   const TEST_ROUTES = {
@@ -132,9 +132,9 @@
   function readImportData(raw) {
     let data = raw;
     if (typeof data === 'string') {
-      try { data = JSON.parse(data); } catch (_) { throw new Error('The core did not return a readable report.'); }
+      try { data = JSON.parse(data); } catch (_) { throw new Error('The import report could not be read.'); }
     }
-    if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('The core did not return a readable report.');
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('The import report could not be read.');
     return [data.report, data.summary, data].reduce(
       (merged, part) => part && typeof part === 'object' && !Array.isArray(part) ? Object.assign(merged, part) : merged, {});
   }
@@ -202,7 +202,7 @@
       return await tauriInvoke(name, args);
     }
     if (testMode) return await fetchTest(name, args);
-    throw new Error('No core bridge and no test port are available.');
+    throw new Error("Wire's own service is not available in this window.");
   }
 
   async function fetchTest(name, args) {
@@ -220,7 +220,7 @@
     if (!response.ok) {
       let detail = '';
       try { const body = await response.json(); detail = body && (body.error || body.message) || ''; } catch (_) { /* no JSON body */ }
-      throw new Error('Core answered ' + response.status + (detail ? ': ' + detail : '') + '.');
+      throw new Error('The service answered ' + response.status + (detail ? ': ' + detail : '') + '.');
     }
     if (response.status === 204) return {};
     try { return await response.json(); } catch (_) { return {}; }
@@ -292,7 +292,8 @@
         platform: String(pickField(item, 'platform') || '').toLowerCase(),
         label: String(pickField(item, 'label') || ''),
         ratio: String(pickField(item, 'ratio') || ''),
-        maxTextLength: countOf(pickField(item, 'max_text_length', 'maxTextLength', 'max_length'))
+        maxTextLength: countOf(pickField(item, 'max_text_length', 'maxTextLength', 'max_length')),
+        media: String(pickField(item, 'media') || '').toLowerCase()
       }))
       .filter(preset => preset.id && preset.platform) : [];
     const telegram = {
@@ -373,10 +374,10 @@
     const platform = raw.split(':')[0];
     if (platform === 'telegram') {
       const name = telegram && (telegram.chatTitle || telegram.chatId);
-      return name ? 'Telegram — ' + name : 'Telegram';
+      return name || 'Telegram channel';
     }
-    if (platform === 'youtube') return 'YouTube';
-    if (platform === 'facebook_page') return 'Facebook Page';
+    if (platform === 'youtube') return 'YouTube channel';
+    if (platform === 'facebook_page') return 'Facebook page';
     return platform || raw;
   }
 
@@ -396,12 +397,12 @@
   }
 
   async function refreshState() {
-    setStatus(connected ? 'Refreshing…' : 'Checking core…', 'info');
+    setStatus(connected ? 'Refreshing…' : 'Connecting…', 'info');
     try {
       state = normalizeState(await callCore('state'));
       coreError = null;
       connected = true;
-      setStatus('Core connected', 'ok');
+      setStatus('Connected', 'ok');
       applyVersion();
     } catch (err) {
       coreError = message(err);
@@ -455,7 +456,7 @@
     $('#offlineBanner').hidden = connected;
     $('#offlineDetail').textContent = coreError || 'No core bridge or test API answered.';
     $('#queueBtn').disabled = !connected || state.targets.length === 0;
-    $('#queueBtn').title = !connected ? 'Core is offline — nothing can be queued.' : '';
+    $('#queueBtn').title = !connected ? 'Wire is not answering — nothing can be queued.' : '';
     updateCount();
   }
 
@@ -468,16 +469,28 @@
     }
     state.targets.forEach((target, index) => {
       const inputId = 'target-' + index;
-      host.append(el('label', { class: 'check', for: inputId },
-        el('input', { type: 'checkbox', name: 'target', id: inputId, value: target.id, disabled: !connected || !target.enabled }),
+      // Text posts only for now: a destination that needs a video or an image says
+      // so here instead of failing after the post is queued.
+      const mediaOnly = needsMedia(target.platform);
+      host.append(el('label', { class: 'check', for: inputId, title: mediaOnly ? 'Needs a video or an image — ships in a later build' : '' },
+        el('input', { type: 'checkbox', name: 'target', id: inputId, value: target.id, disabled: !connected || !target.enabled || mediaOnly }),
         el('span', { text: target.label }),
-        el('span', { class: 'chip', 'data-level': connectionLevel(target.connection), text: connectionLabel(target.connection) })
+        el('span', { class: 'chip', 'data-level': connectionLevel(target.connection), text: connectionLabel(target.connection) }),
+        mediaOnly ? el('span', { class: 'cell-note', text: 'needs a video or an image — ships in a later build' }) : null
       ));
     });
   }
 
+  // The composer writes a caption; a size that needs a video or an image is not
+  // offered until the app can attach one.
   function presetsFor(platform) {
-    return state.presets.filter(preset => preset.platform === String(platform || '').toLowerCase());
+    return state.presets.filter(preset =>
+      preset.platform === String(platform || '').toLowerCase() && (preset.media === 'none' || preset.media === ''));
+  }
+
+  function needsMedia(platform) {
+    const all = state.presets.filter(preset => preset.platform === String(platform || '').toLowerCase());
+    return all.length > 0 && presetsFor(platform).length === 0;
   }
 
   function presetHelp(preset) {
@@ -601,22 +614,40 @@
     host.append(queueLayout === 'cards' ? renderCards(rows) : renderTable(rows));
   }
 
+  // Why an action is unavailable is written on the row, not only in a tooltip.
+  const ACTION_REASON = {
+    sent: 'sent, nothing to retry',
+    cancelled: 'cancelled, nothing to retry',
+    sending: 'sending now, nothing to retry',
+    queued: 'queued, nothing to retry',
+    dead: 'gave up after its attempts; Cancel is closed'
+  };
+
   function actionButtons(row) {
     const retryable = !['sent', 'sending', 'queued'].includes(row.shown);
     const cancellable = ['queued', 'sending', 'failed-retry'].includes(row.shown);
     const retry = el('button', {
       class: 'mini-button', type: 'button', disabled: !retryable,
-      title: retryable ? 'Retry this delivery' : 'Retry is not available for this state',
+      title: retryable ? 'Retry this delivery' : (ACTION_REASON[row.shown] || 'Retry is not available for this state'),
       'aria-label': 'Retry delivery ' + row.id,
       on: { click: () => retryDelivery(row) }
     }, icon('retry'), 'Retry');
     const cancel = el('button', {
       class: 'mini-button', type: 'button', disabled: !cancellable,
-      title: cancellable ? 'Cancel this delivery' : 'Cancel is not available for this state',
+      title: cancellable ? 'Cancel this delivery' : (row.shown === 'sent' ? 'already sent; nothing to cancel' : 'Cancel is not available for this state'),
       'aria-label': 'Cancel delivery ' + row.id,
       on: { click: () => confirmCancel(row) }
     }, icon('cancel'), 'Cancel');
-    return el('div', { class: 'row-actions' }, retry, cancel);
+    const reasons = [];
+    if (!retryable && !cancellable) reasons.push(ACTION_REASON[row.shown] || 'nothing to retry or cancel');
+    else {
+      if (!retryable) reasons.push(ACTION_REASON[row.shown] || 'retry is closed for this state');
+      if (!cancellable) reasons.push('cancel is closed after the first attempt');
+    }
+    const reason = reasons.join(' · ');
+    return el('div', { class: 'row-actions-wrap' },
+      el('div', { class: 'row-actions' }, retry, cancel),
+      reason ? el('div', { class: 'cell-note', text: reason }) : null);
   }
 
   function stateChip(row) {
@@ -1091,14 +1122,6 @@
     });
   }
 
-  function browseDialog() {
-    openDialog({
-      title: 'Choose a folder',
-      body: 'Folder picking is not wired yet. The core owns the data folder shown in Settings; nothing was changed.',
-      confirmLabel: 'Done', cancelLabel: null
-    });
-  }
-
   /* ---------- Actions ---------- */
 
   function readSchedule() {
@@ -1124,7 +1147,7 @@
 
   async function queuePost() {
     clearComposerError();
-    if (!connected) return showComposerError('Core is offline — nothing is queued.');
+    if (!connected) return showComposerError('Wire is not answering — nothing was queued.');
     const text = $('#postText').value.trim();
     if (!text) { showComposerError('Write some text before queueing.'); $('#postText').focus(); return; }
     const targets = $$('input[name="target"]:checked').map(input => input.value);
@@ -1159,7 +1182,7 @@
   }
 
   async function runDeliveryAction(command, id, successText) {
-    if (!connected) throw new Error('Core is offline — nothing was changed.');
+    if (!connected) throw new Error('Wire is not answering — nothing was changed.');
     await callCore(command, { id });
     setStatus(successText, 'ok');
     await refreshState();
@@ -1191,7 +1214,7 @@
 
   // Connect: the token is checked by Telegram itself before anything is saved as "connected".
   async function telegramConnect() {
-    if (!connected) { setStatus('Core is offline — nothing was saved', 'bad'); return null; }
+    if (!connected) { setStatus('Wire is not answering — nothing was saved', 'bad'); return null; }
     const input = $('#telegramTokenInput');
     const token = input.value.trim();
     if (!token && !state.telegram.configured) {
@@ -1216,7 +1239,7 @@
 
   // Discover: every channel the bot can see, by name; an empty answer says what to do.
   async function telegramFind() {
-    if (!connected) { setStatus('Core is offline — nothing was read', 'bad'); return; }
+    if (!connected) { setStatus('Wire is not answering — nothing was read', 'bad'); return; }
     const list = $('#telegramChatList');
     const help = $('#telegramFindHelp');
     setStatus('Asking Telegram which channels the bot can see…', 'info');
@@ -1256,7 +1279,7 @@
 
   // Use a channel by @username, t.me link or id; the title Telegram gives back is saved with it.
   async function telegramUse(reference) {
-    if (!connected) { setStatus('Core is offline — nothing was saved', 'bad'); return null; }
+    if (!connected) { setStatus('Wire is not answering — nothing was saved', 'bad'); return null; }
     const text = String(reference || $('#telegramChannel').value || '').trim();
     if (!text) { setStatus('Choose a channel from the list or paste one first', 'bad'); return null; }
     setStatus('Checking the channel with Telegram…', 'info');
@@ -1333,7 +1356,6 @@
     $('#importRunBtn').addEventListener('click', confirmImport);
     $('#settingsTargetsBtn').addEventListener('click', () => showSection('targets'));
     $('#settingsUpdateBtn').addEventListener('click', updateDialog);
-    $$('[data-browse]').forEach(button => button.addEventListener('click', browseDialog));
     $('#themeGroup').addEventListener('click', event => {
       const button = event.target.closest('[data-theme-choice]');
       if (button) applyTheme(button.dataset.themeChoice);
