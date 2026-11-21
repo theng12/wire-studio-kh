@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.2 — 2026-11-21
+
+- Destinations carry their names, never a key: "Wire Smoke Test", "YouTube channel", "Facebook page" — in the Queue and the Composer, with the technical id kept only as a tooltip.
+- The word "core" is gone from every sentence you can see, including the footer and the offline message.
+- A Retry or Cancel that cannot be used now says why on the row itself — "sent, nothing to retry", "cancel is closed after the first attempt" — instead of only greying out.
+- The dead Browse… button is removed until choosing a folder actually works.
+- The Composer now says what it does: one caption, text only for now. Sizes that need a video or an image are not offered, and their destinations say so plainly.
+
 ## 0.4.1 — 2026-11-21
 
 - Every destination is named the way you see it on Targets: the Queue and the Composer now say "YouTube", "Facebook Page" and "Telegram — Wire Smoke Test" instead of internal ids.
