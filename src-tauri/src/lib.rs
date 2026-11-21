@@ -24,6 +24,17 @@ pub struct AppState {
     pub paused_until: Mutex<Option<chrono::DateTime<chrono::Utc>>>,
     pub data_dir: PathBuf,
     pub in_flight: std::sync::atomic::AtomicUsize,
+    /// The dispatcher sleeps here until the next due row or a queue change.
+    pub wake: std::sync::Condvar,
+    pub wake_lock: Mutex<()>,
+}
+
+impl AppState {
+    /// Re-arms the dispatcher: called by every path that adds or changes work.
+    pub fn wake(&self) {
+        let _guard = self.wake_lock.lock();
+        self.wake.notify_all();
+    }
 }
 
 pub type Shared = Arc<AppState>;
@@ -48,6 +59,8 @@ pub fn init_state(dir: &Path) -> Result<Shared, String> {
         paused_until: Mutex::new(None),
         data_dir: dir.to_path_buf(),
         in_flight: std::sync::atomic::AtomicUsize::new(0),
+        wake: std::sync::Condvar::new(),
+        wake_lock: Mutex::new(()),
     }))
 }
 

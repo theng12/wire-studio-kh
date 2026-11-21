@@ -117,15 +117,12 @@ else
   bad "trigger with x-wire-operator answers 200" "HTTP $http body=$(cat "$tmp/trigger" 2>/dev/null)"
 fi
 
-# Read-only System Events query: no activate, no clicks, no focus change.
-wout="$(osascript -e 'tell application "System Events" to count windows of process "Wire Studio KH"' 2>&1)"
-wrc=$?
-if [ "$wout" = "0" ]; then
-  pass "no window owned by the headless process"
-elif [ "$wrc" -ne 0 ] && printf '%s' "$wout" | grep -qi 'process'; then
-  pass "no window owned by the headless process (process not listed)"
+# A GUI app maps WindowServer; the headless core must never connect to it.
+# This reads the process's own open files — no AppleScript, no clicks, no focus.
+if lsof -p "$pid" 2>/dev/null | grep -q 'WindowServer'; then
+  bad "headless process never connects to WindowServer" "WindowServer file open"
 else
-  bad "no window owned by the headless process" "count=$wout rc=$wrc"
+  pass "headless process never connects to WindowServer"
 fi
 
 term_rc="none"

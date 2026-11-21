@@ -41,7 +41,9 @@ pub fn spawn(state: Shared) {
                     }
                     eprintln!("queue resumed: hold expired");
                 } else {
-                    std::thread::sleep(Duration::from_millis(200));
+                    if let Ok(guard) = state.wake_lock.lock() {
+                        let _ = state.wake.wait_timeout(guard, Duration::from_millis(200));
+                    }
                     continue;
                 }
             }
@@ -77,7 +79,10 @@ pub fn spawn(state: Shared) {
                         })
                         .unwrap_or(IDLE_TICK)
                 };
-                std::thread::sleep(wait);
+                // A queue change wakes this at once instead of waiting the tick out.
+                if let Ok(guard) = state.wake_lock.lock() {
+                    let _ = state.wake.wait_timeout(guard, wait);
+                }
                 continue;
             };
 

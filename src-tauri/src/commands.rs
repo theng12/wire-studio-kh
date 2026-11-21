@@ -60,31 +60,39 @@ pub fn queue_post(
     if targets.is_empty() {
         return Err("Pick at least one channel.".into());
     }
-    let mut store = s.store.lock().map_err(|_| "queue busy".to_string())?;
-    let (post_id, ids) = store.create_post(&text, &targets).map_err(err)?;
-    if delay_s > 0 {
-        let at = chrono::Utc::now() + chrono::Duration::seconds(delay_s);
-        store.set_next_attempt_for_post(&post_id, at).map_err(err)?;
-    }
-    Ok(serde_json::json!({ "post_id": post_id, "delivery_ids": ids }))
+    let created = {
+        let mut store = s.store.lock().map_err(|_| "queue busy".to_string())?;
+        let (post_id, ids) = store.create_post(&text, &targets).map_err(err)?;
+        if delay_s > 0 {
+            let at = chrono::Utc::now() + chrono::Duration::seconds(delay_s);
+            store.set_next_attempt_for_post(&post_id, at).map_err(err)?;
+        }
+        serde_json::json!({ "post_id": post_id, "delivery_ids": ids })
+    };
+    s.wake();
+    Ok(created)
 }
 
 #[tauri::command]
 pub fn cancel_delivery(s: State<'_, Shared>, id: String) -> Result<serde_json::Value, String> {
-    let mut store = s.store.lock().map_err(|_| "queue busy".to_string())?;
-    match store.cancel(&id) {
-        Ok(()) => Ok(serde_json::json!({ "id": id, "state": "cancelled" })),
-        Err(e) => Err(format!("This post can no longer be cancelled: {e}")),
-    }
+    let outcome = {
+        let mut store = s.store.lock().map_err(|_| "queue busy".to_string())?;
+        store.cancel(&id)
+    };
+    outcome.map_err(|e| format!("This post can no longer be cancelled: {e}"))?;
+    s.wake();
+    Ok(serde_json::json!({ "id": id, "state": "cancelled" }))
 }
 
 #[tauri::command]
 pub fn retry_delivery(s: State<'_, Shared>, id: String) -> Result<serde_json::Value, String> {
-    let mut store = s.store.lock().map_err(|_| "queue busy".to_string())?;
-    match store.retry(&id) {
-        Ok(()) => Ok(serde_json::json!({ "id": id, "state": "queued" })),
-        Err(e) => Err(format!("This post cannot be retried: {e}")),
-    }
+    let outcome = {
+        let mut store = s.store.lock().map_err(|_| "queue busy".to_string())?;
+        store.retry(&id)
+    };
+    outcome.map_err(|e| format!("This post cannot be retried: {e}"))?;
+    s.wake();
+    Ok(serde_json::json!({ "id": id, "state": "queued" }))
 }
 
 #[tauri::command]

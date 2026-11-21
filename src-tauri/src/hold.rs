@@ -111,6 +111,7 @@ pub(crate) fn refresh_pause(state: &AppState) {
     if pause_expired(*until, Utc::now()) {
         state.paused.store(false, Ordering::SeqCst);
         *until = None;
+        state.wake();
     }
 }
 
@@ -198,6 +199,7 @@ fn take_hold(state: &Shared, query: &str) -> Value {
 fn release(state: &Shared) -> Value {
     state.paused.store(false, Ordering::SeqCst);
     *guard(&state.paused_until) = None;
+    state.wake();
     json!({ "resumed": true })
 }
 

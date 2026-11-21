@@ -197,6 +197,7 @@ fn schedule(state: &Shared, payload: Value) -> (u16, Value) {
             return (400, json!({ "ok": false, "error": error, "post_id": "", "delivery_ids": [] }))
         }
     };
+    state.wake();
     (200, json!({ "ok": true, "post_id": post_id, "delivery_ids": delivery_ids }))
 }
 
@@ -213,6 +214,7 @@ fn trigger(state: &Shared, payload: Value, retry: bool) -> (u16, Value) {
             result_value(store.cancel(&id).map_err(|error| error.to_string()))
         }
     };
+    state.wake();
     let (post_id, delivery_ids) = ids_for(state, &id);
     match result {
         Ok(value) => {

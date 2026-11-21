@@ -90,6 +90,13 @@ hold_token=""
 [ -f "$HOME/Library/KHUpdater/hold-token" ] && hold_token="$(tr -d '[:space:]' < "$HOME/Library/KHUpdater/hold-token")"
 pid=""
 
+# The hold port is fixed, so refuse to run beside another copy: the calls would
+# reach that process and every assert below would test the wrong app.
+if lsof -nP -iTCP:8649 -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "FAIL hold port 8649 is already in use by another process; stop it first" >&2
+  exit 1
+fi
+
 cleanup() {
   rc=$?
   if [ -n "$pid" ]; then
@@ -131,9 +138,12 @@ launch() {
 }
 now_state() { curl -fsS -m 5 "$url/api/test/state" > "$tmp/state" 2>/dev/null || true; }
 schedule() {
+  # Default 5 s so the rows are still queued while the hold assertions run; a
+  # due-now row is claimed within a millisecond and would already be terminal.
+  local delay="${3:-5}"
   curl -sS -m 5 -o "$1" -w '%{http_code}' -X POST "$url/api/test/trigger/schedule" \
     -H "x-wire-operator: $token" -H 'Content-Type: application/json' \
-    --data "{\"text\":\"$2\",\"targets\":[\"telegram:TESTCHAT\"],\"delay_s\":0}" || true
+    --data "{\"text\":\"$2\",\"targets\":[\"telegram:TESTCHAT\"],\"delay_s\":$delay}" || true
 }
 hold_post() {
   if [ -n "$hold_token" ]; then
@@ -244,9 +254,11 @@ run_full() {
   if launch; then pass "restarted with the same data dir"; else bad "restarted with the same data dir" "server did not come up; log at $log"; return 1; fi
   now_state
   keep_state="$(row_state "$tmp/state" "$keep_id")"
+  # The contract asks for a followable id, not a particular state. With no bot
+  # token the restarted dispatcher legitimately parks the row at "attention".
   case "$keep_state" in
-    pending|queued) pass "queued row $keep_id survived kill -9 ($keep_state)" ;;
-    *) bad "queued row $keep_id survived kill -9" "observed state=$keep_state" ;;
+    pending|queued|attention) pass "row $keep_id survived kill -9 with its id ($keep_state)" ;;
+    *) bad "row $keep_id did not survive kill -9" "observed state=$keep_state" ;;
   esac
 
   resumed=""
@@ -281,7 +293,7 @@ run_full() {
 
 run_expiry() {
   local code row_id paused state tried
-  code="$(schedule "$tmp/expiry-schedule" "expiry proof")"
+  code="$(schedule "$tmp/expiry-schedule" "expiry proof" 0)"
   row_id="$(first_delivery "$tmp/expiry-schedule")"
   if [ "$code" = "200" ] && [ -n "$row_id" ]; then
     pass "expiry proof queued live row $row_id with delay 0 to telegram:TESTCHAT"
