@@ -152,7 +152,7 @@ fn parse_json(bytes: &[u8], label: &str) -> Result<Value, String> {
     serde_json::from_slice(bytes).map_err(|_| format!("{label} cannot be parsed"))
 }
 
-fn str_field(value: &Value, key: &str) -> Option<&str> {
+fn str_field<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value.get(key).and_then(Value::as_str)
 }
 
@@ -403,7 +403,7 @@ fn plan_fonts(config: &Value, cursor: &Value) -> Vec<PlannedFont> {
     pools
         .iter()
         .map(|(script, pool)| {
-            let fonts = pool
+            let fonts: Vec<_> = pool
                 .get("fonts")
                 .and_then(Value::as_array)
                 .map(|choices| {
