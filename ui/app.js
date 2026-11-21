@@ -2,12 +2,11 @@
 
 (() => {
   // Fallback only: the core reports the real version and applyVersion() uses it.
-  let APP_VERSION = '0.4.2';
+  let APP_VERSION = '0.4.3';
   const WHATS_NEW = [
-    'Destinations carry their names — "Wire Smoke Test", "YouTube channel" — and never an internal id.',
-    'The Composer says what it really does: one caption, text only for now, with video and image posts in a later build.',
-    'A greyed-out Retry or Cancel now says why on the row itself, for example "sent, nothing to retry".',
-    'The Browse… button is gone until choosing a folder actually works.'
+    'Settings now has a Gateway card: paste its address and key, press Connect, and Wire says exactly what Gateway answered — "connected · 51 models available", an empty catalogue, or Gateway\'s own refusal.',
+    'A saved Gateway key that stops working says so in Gateway\'s words and offers Check connection, instead of pretending it is connected.',
+    '"Core" is gone from the last places it survived on screen.'
   ];
   const SUPPORT_URL = 'https://nowpayments.io/donation/studiokh';
   const TEST_ROUTES = {
@@ -18,7 +17,9 @@
     save_telegram: ['POST', '/api/test/trigger/save-telegram'],
     telegram_connected_as: ['POST', '/api/test/trigger/telegram-connected-as'],
     telegram_discover: ['POST', '/api/test/trigger/telegram-discover'],
-    telegram_use_channel: ['POST', '/api/test/trigger/telegram-use-channel']
+    telegram_use_channel: ['POST', '/api/test/trigger/telegram-use-channel'],
+    save_gateway: ['POST', '/api/test/trigger/gateway-save'],
+    list_dirs: ['POST', '/api/test/trigger/list-dirs']
   };
   const SECTIONS = {
     composer: { eyebrow: 'Compose', title: 'Composer', subtitle: 'Write a text post, choose where it goes, and send it now or later.' },
@@ -64,7 +65,8 @@
   function emptyState() {
     return {
       dataDir: '', targets: [], deliveries: [], presets: [],
-      telegram: { configured: false, connection: 'not_configured', chatId: '', last4: '', reason: '' }
+      telegram: { configured: false, connection: 'not_configured', chatId: '', last4: '', reason: '' },
+      gateway: { configured: false, connection: 'not_configured', url: '', last4: '', models: null, reason: '' }
     };
   }
 
@@ -313,6 +315,16 @@
         ? { ...named, connection: telegram.connection, reason: telegram.reason }
         : named;
     });
+    const gatewayRaw = source.gateway && typeof source.gateway === 'object' ? source.gateway : {};
+    const gateway = {
+      configured: Boolean(gatewayRaw.configured),
+      connection: normalizeConnection(gatewayRaw.connection_state || gatewayRaw.connectionState || gatewayRaw.state),
+      url: String(gatewayRaw.url || ''),
+      last4: lastFour(gatewayRaw.key_masked || gatewayRaw.keyMasked),
+      // a count or nothing: "no data" must never read as zero models
+      models: countOf(gatewayRaw.models),
+      reason: String(gatewayRaw.reason || gatewayRaw.error || '')
+    };
     return {
       version: String(source.version || ''),
       dataDir: String(source.data_dir || source.dataDir || ''),
@@ -320,6 +332,7 @@
       targets,
       presets,
       telegram,
+      gateway,
       deliveries: deliveriesRaw.map(normalizeDelivery).map(row => ({
         ...row,
         targetName: targetLabel(row.target, telegram)
@@ -454,7 +467,7 @@
     renderTargets();
     renderSettings();
     $('#offlineBanner').hidden = connected;
-    $('#offlineDetail').textContent = coreError || 'No core bridge or test API answered.';
+    $('#offlineDetail').textContent = coreError || "Wire's own service did not answer.";
     $('#queueBtn').disabled = !connected || state.targets.length === 0;
     $('#queueBtn').title = !connected ? 'Wire is not answering — nothing can be queued.' : '';
     updateCount();
@@ -464,7 +477,7 @@
     const host = $('#targetChecks');
     host.replaceChildren();
     if (!state.targets.length) {
-      host.append(el('p', { class: 'help', text: 'No targets reported by the core. Add a Telegram token on the Targets page first.' }));
+      host.append(el('p', { class: 'help', text: 'No targets yet. Add a Telegram token on the Targets page first.' }));
       return;
     }
     state.targets.forEach((target, index) => {
@@ -494,11 +507,11 @@
   }
 
   function presetHelp(preset) {
-    if (!preset) return 'No presets reported by the core.';
+    if (!preset) return 'No sizes reported yet.';
     const parts = [];
     if (preset.ratio) parts.push('Ratio ' + preset.ratio);
     if (preset.maxTextLength) parts.push('Max ' + Number(preset.maxTextLength).toLocaleString() + ' characters');
-    return parts.length ? parts.join(' · ') : 'No format details reported by the core.';
+    return parts.length ? parts.join(' · ') : 'No format details reported yet.';
   }
 
   function renderPresetPickers() {
@@ -713,8 +726,8 @@
     chip.textContent = connectionLabel(telegram.connection);
     chip.dataset.level = connectionLevel(telegram.connection);
     $('#telegramReason').textContent = telegram.reason ||
-      (telegram.connection === 'ready' ? 'Connection verified by the core.'
-        : telegram.connection === 'failed' ? 'Connection failed; no reason reported by the core.'
+      (telegram.connection === 'ready' ? 'Connected — Telegram confirmed it.'
+        : telegram.connection === 'failed' ? 'Connection failed; no reason was reported.'
           : telegram.connection === 'configured' ? 'Token and channel saved; check the connection to confirm them.'
             : 'No connection yet. Paste the bot token below and press Connect.');
 
@@ -758,8 +771,8 @@
     chip.dataset.level = connectionLevel(connection);
     $(reasonSelector).textContent = target && target.reason
       ? target.reason
-      : connection === 'ready' ? 'Connection verified by the core.'
-        : connection === 'failed' ? 'Connection failed; no reason reported by the core.'
+      : connection === 'ready' ? 'Connected and confirmed.'
+        : connection === 'failed' ? 'Connection failed; no reason was reported.'
           : 'Not connected yet.';
   }
 
@@ -770,6 +783,51 @@
     $$('[data-theme-choice]').forEach(button => {
       button.classList.toggle('is-active', button.dataset.themeChoice === storageGet('wire.appearance', 'system'));
     });
+    renderGatewayCard();
+  }
+
+  // Gateway is the model source: the chip never says connected until Gateway answered a read.
+  function renderGatewayCard() {
+    const gateway = state.gateway;
+    const chip = $('#gatewayChip');
+    chip.textContent = connectionLabel(gateway.connection);
+    chip.dataset.level = connectionLevel(gateway.connection);
+    $('#gatewayReason').textContent = gateway.reason ||
+      (gateway.connection === 'ready'
+        ? (gateway.models === 0 ? 'Connected. Gateway publishes no models yet.' : 'Connected to Gateway.')
+        : gateway.connection === 'failed' ? 'Gateway refused the check; no reason reported.'
+          : gateway.connection === 'configured' ? 'Saved, not checked yet. Press Check connection.'
+            : 'Not connected yet. Gateway is where Wire reads its models from.');
+
+    const urlInput = $('#gatewayUrlInput');
+    if (!urlInput.value && gateway.url) urlInput.value = gateway.url;
+    $('#gatewayKeyHelp').textContent = gateway.last4
+      ? 'Saved key •••• ' + gateway.last4 + '. Paste a new key only to replace it.'
+      : gateway.configured ? 'A key is saved. Paste a new key only to replace it.'
+        : 'No key saved yet. Paste the Gateway API key.';
+    $('#gatewayConnectBtn').textContent = gateway.configured ? 'Check connection' : 'Connect';
+  }
+
+  // Connect or check: a blank key keeps the saved one, so the same button does both.
+  async function gatewayConnect() {
+    if (!connected) { setStatus('Wire is not answering — nothing was saved', 'bad'); return; }
+    const url = $('#gatewayUrlInput').value.trim();
+    const key = $('#gatewayKeyInput').value.trim();
+    if (!url && !state.gateway.url) { setStatus('Paste the Gateway address first', 'bad'); $('#gatewayUrlInput').focus(); return; }
+    if (!key && !state.gateway.configured) { setStatus('Paste the Gateway API key first', 'bad'); $('#gatewayKeyInput').focus(); return; }
+    setStatus('Asking Gateway for its models…', 'info');
+    let result;
+    try {
+      result = unwrap(await callCore('save_gateway', { url, key }));
+    } catch (error) {
+      setStatus('Not connected — ' + message(error), 'bad');
+      return;
+    }
+    if (key) $('#gatewayKeyInput').value = '';
+    // Say the answer after the state refresh, or the refresh's own line replaces it.
+    await refreshState();
+    if (result && result.connection_state === 'ready') setStatus('Connected to Gateway — ' + result.reason, 'ok');
+    else setStatus('Not connected — ' + (result && result.reason ? result.reason : 'Gateway gave no answer'), 'bad');
   }
 
   /* ---------- Still Posts import ---------- */
@@ -1356,6 +1414,13 @@
     $('#importRunBtn').addEventListener('click', confirmImport);
     $('#settingsTargetsBtn').addEventListener('click', () => showSection('targets'));
     $('#settingsUpdateBtn').addEventListener('click', updateDialog);
+    $('#gatewayConnectBtn').addEventListener('click', gatewayConnect);
+    $('#gatewayKeyInput').addEventListener('keydown', event => {
+      if (event.key === 'Enter') { event.preventDefault(); gatewayConnect(); }
+    });
+    $('#gatewayUrlInput').addEventListener('keydown', event => {
+      if (event.key === 'Enter') { event.preventDefault(); gatewayConnect(); }
+    });
     $('#themeGroup').addEventListener('click', event => {
       const button = event.target.closest('[data-theme-choice]');
       if (button) applyTheme(button.dataset.themeChoice);

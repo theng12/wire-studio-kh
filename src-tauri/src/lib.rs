@@ -101,6 +101,7 @@ pub fn run_app() {
             commands::telegram_discover,
             commands::telegram_resolve,
             commands::telegram_use_channel,
+            commands::save_gateway,
             commands::save_appearance,
             commands::check_updates,
             commands::story_import_preview,

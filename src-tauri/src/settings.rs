@@ -14,10 +14,24 @@ pub struct TelegramCheck {
     pub at: String,
 }
 
+/// Gateway's own answer to the last check: how much it publishes, and whether that read went stale.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct GatewayCheck {
+    pub models: usize,
+    pub stale: bool,
+    pub at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     pub schema_version: u32,
+    /// Where Wire reads its models from, e.g. http://127.0.0.1:8787. Empty = never set.
+    pub gateway_url: String,
+    /// Set only when `/v1/models` answered this key with a model catalogue.
+    pub gateway_verified: Option<GatewayCheck>,
+    /// Gateway's own words when the last check failed; cleared on success.
+    pub gateway_verify_error: String,
     /// The Telegram channel this Mac posts to, e.g. "@wire_smoke_test" or "-100…".
     pub telegram_chat: String,
     /// Telegram's own name for that channel, shown beside the saved destination.
@@ -34,6 +48,9 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             schema_version: 1,
+            gateway_url: String::new(),
+            gateway_verified: None,
+            gateway_verify_error: String::new(),
             telegram_chat: String::new(),
             telegram_chat_title: String::new(),
             appearance: "system".into(),
@@ -74,6 +91,37 @@ pub fn telegram_status(
     }
 }
 
+/// The same rule for Gateway: only a `/v1/models` answer may say "connected", and an empty
+/// catalogue is a healthy connection — never an error and never a silent zero.
+pub fn gateway_status(
+    has_key: bool,
+    url: &str,
+    verified: Option<&GatewayCheck>,
+    verify_error: &str,
+) -> (String, String) {
+    if !has_key || url.trim().is_empty() {
+        return ("not_configured".into(), String::new());
+    }
+    match verified {
+        Some(check) => {
+            let mut reason = if check.models == 0 {
+                "connected · no models published yet".to_string()
+            } else {
+                format!("connected · {} models available", check.models)
+            };
+            if check.stale {
+                reason.push_str(" (catalogue is stale)");
+            }
+            ("ready".into(), reason)
+        }
+        None if !verify_error.is_empty() => ("failed".into(), verify_error.to_string()),
+        None => (
+            "configured".into(),
+            "Saved, not checked yet. Press Check connection to ask Gateway.".into(),
+        ),
+    }
+}
+
 pub fn path_in(data_dir: &Path) -> PathBuf {
     data_dir.join(SETTINGS_FILE)
 }
@@ -108,6 +156,24 @@ mod tests {
         assert_eq!(load(&p).telegram_chat, "@wire_smoke_test");
         assert_eq!(load(&p).telegram_verified, None);
         let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn gateway_status_reads_the_catalogue_never_the_health_route() {
+        assert_eq!(gateway_status(false, "http://x", None, "").0, "not_configured");
+        assert_eq!(gateway_status(true, "", None, "").0, "not_configured");
+        assert_eq!(gateway_status(true, "http://x", None, "").0, "configured");
+        assert_eq!(gateway_status(true, "http://x", None, "Invalid API key.").0, "failed");
+        let empty = GatewayCheck { models: 0, stale: false, at: "t".into() };
+        assert_eq!(
+            gateway_status(true, "http://x", Some(&empty), ""),
+            ("ready".into(), "connected · no models published yet".into())
+        );
+        let stale = GatewayCheck { models: 3, stale: true, at: "t".into() };
+        assert_eq!(
+            gateway_status(true, "http://x", Some(&stale), ""),
+            ("ready".into(), "connected · 3 models available (catalogue is stale)".into())
+        );
     }
 
     #[test]

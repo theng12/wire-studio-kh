@@ -124,6 +124,7 @@ fn state_reply(state: &Shared) -> Value {
             "connection_state": connection,
             "reason": reason,
         },
+        "gateway": crate::gateway::status_json(&state.data_dir),
     })
 }
 
@@ -344,6 +345,26 @@ fn import_channel(state: &AppState, payload: Value) -> (u16, Value) {
     }
 }
 
+/// The headless twin of `commands::save_gateway` — one shared attempt, two doorways.
+fn gateway_save(state: &AppState, payload: Value) -> (u16, Value) {
+    let url = payload.get("url").and_then(Value::as_str).unwrap_or("").to_string();
+    let key = payload.get("key").and_then(Value::as_str).unwrap_or("").to_string();
+    let reply = crate::gateway::connect_blocking(&state.data_dir, &url, &key);
+    let ok = reply.get("ok").and_then(Value::as_bool).unwrap_or(false);
+    let refused = reply.get("reason").and_then(Value::as_str).unwrap_or("");
+    // A refused attempt is an answer, not a broken request: 200 with ok:false and the words.
+    (if ok || !refused.is_empty() { 200 } else { 400 }, reply)
+}
+
+/// The headless twin of `commands::list_dirs` — the same browser the Choose… button opens.
+fn list_dirs(payload: Value) -> (u16, Value) {
+    let path = payload.get("path").and_then(Value::as_str).map(str::to_string);
+    match crate::commands::list_dirs(path) {
+        Ok(value) => (200, value),
+        Err(error) => (400, json!({ "ok": false, "error": error })),
+    }
+}
+
 fn save_telegram(state: &AppState, payload: Value) -> (u16, Value) {
     let (token, chat) = match telegram_fields(&payload) {
         Ok(fields) => fields,
@@ -528,6 +549,8 @@ pub fn serve(state: Shared, port: u16) -> Result<(), String> {
             ("POST", "/api/test/trigger/telegram-discover") => "telegram-discover",
             ("POST", "/api/test/trigger/telegram-use-channel") => "telegram-use-channel",
             ("POST", "/api/test/trigger/import") => "import",
+            ("POST", "/api/test/trigger/gateway-save") => "gateway-save",
+            ("POST", "/api/test/trigger/list-dirs") => "list-dirs",
             _ => {
                 let reason = format!("unknown route: {} {}", method.as_str(), path.as_str());
                 respond(request, 404, json!({ "ok": false, "error": reason }));
@@ -560,6 +583,8 @@ pub fn serve(state: Shared, port: u16) -> Result<(), String> {
             "telegram-discover" => telegram_discover(&state),
             "telegram-use-channel" => telegram_use_channel(&state, payload),
             "import" => import_channel(&state, payload),
+            "gateway-save" => gateway_save(&state, payload),
+            "list-dirs" => list_dirs(payload),
             _ => trigger(&state, payload, true),
         };
         respond(request, status, reply);

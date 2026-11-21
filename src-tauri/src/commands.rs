@@ -63,6 +63,7 @@ pub fn state(s: State<'_, Shared>) -> Result<serde_json::Value, String> {
         .map(|check| check.bot.clone())
         .unwrap_or_default();
 
+
     let presets: Vec<serde_json::Value> = crate::formats::registry()
         .iter()
         .map(|p| {
@@ -94,6 +95,7 @@ pub fn state(s: State<'_, Shared>) -> Result<serde_json::Value, String> {
             "connection_state": connection,
             "reason": reason,
         },
+        "gateway": crate::gateway::status_json(&s.data_dir),
         "appearance": cfg.appearance,
         "data_dir": s.data_dir.display().to_string(),
     }))
@@ -348,6 +350,17 @@ pub async fn check_updates() -> Result<feedcheck::UpdateState, String> {
 }
 
 /// The in-app folder browser behind every path field's Choose… button.
+/// Gateway is where Wire's models come from. A blank field keeps what is saved, so pressing the
+/// button twice with nothing typed asks Gateway again — one path for Connect and Check connection.
+#[tauri::command]
+pub async fn save_gateway(
+    s: State<'_, Shared>,
+    url: String,
+    key: String,
+) -> Result<serde_json::Value, String> {
+    Ok(crate::gateway::connect(&s.data_dir, &url, &key).await)
+}
+
 #[tauri::command]
 pub fn list_dirs(path: Option<String>) -> Result<serde_json::Value, String> {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/".into());

@@ -204,7 +204,7 @@
 
       <section class="view" id="settingsView" aria-label="Settings" hidden>
         <div class="card">
-          <div class="card-head"><h2>This app</h2><span class="hint" id="settingsVersion">Version 0.4.2</span></div>
+          <div class="card-head"><h2>This app</h2><span class="hint" id="settingsVersion">Version 0.4.3</span></div>
           <div class="setting-row">
             <div><label for="dataFolder">Data folder</label><p class="help">Where Wire keeps its posts and queue.</p></div>
             <div class="path-field"><input type="text" id="dataFolder" value="Not reported" readonly></div>
@@ -215,6 +215,23 @@
           <div class="setting-row">
             <div><span class="field-label">Telegram</span><p class="help" id="settingsTelegramHelp">Not connected yet.</p></div>
             <button class="button subtle" id="settingsTargetsBtn" type="button">Manage targets</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Gateway</h2><span class="chip" id="gatewayChip">not configured</span></div>
+          <p class="reason" id="gatewayReason">Not connected yet. Gateway is where Wire reads its models from.</p>
+          <div class="target-grid">
+            <div class="field">
+              <label for="gatewayUrlInput">Address</label>
+              <input type="text" id="gatewayUrlInput" placeholder="http://127.0.0.1:8787" autocomplete="off" spellcheck="false">
+              <p class="help">The Gateway on this Mac or on your network.</p>
+            </div>
+            <div class="field">
+              <label for="gatewayKeyInput">API key</label>
+              <input type="password" id="gatewayKeyInput" placeholder="Paste the Gateway API key" autocomplete="off" spellcheck="false">
+              <p class="help" id="gatewayKeyHelp">No key saved yet.</p>
+              <div class="actions"><button class="button" id="gatewayConnectBtn" type="button">Connect</button></div>
+            </div>
           </div>
         </div>
         <div class="card">

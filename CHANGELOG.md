@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.3 — 2026-11-22
+
+- Settings has a **Gateway** card: paste Gateway's address and API key and press **Connect**. Wire asks Gateway for its live model list and says exactly what came back — "connected · 51 models available", "connected · no models published yet", or Gateway's own words, for example "Invalid API key.".
+- A key that stops working (rotated or revoked at Gateway) is never shown as connected: the card reads **connection failed** with Gateway's sentence, and the button becomes **Check connection**. A saved key is shown only as `•••• abcd`.
+- An unreachable Gateway says "Nothing is listening at http://…" instead of a request error, and a check that hangs gives up after 10 seconds.
+- Nothing polls: Wire asks Gateway only when you press the button, and the saved answer is a fact with a time, never a cached "connected".
+- The word "core" is gone from the last screens that still said it (empty lists, verification reasons, the offline banner).
+- The Import screen's **Choose…** browser is now proven headless as well as in the window: it lists real folders, and an unreadable folder says why. The Settings Browse… stays gone — Wire's data folder is fixed when the app starts, so a button there could not work.
+
 ## 0.4.2 — 2026-11-21
 
 - Destinations carry their names, never a key: "Wire Smoke Test", "YouTube channel", "Facebook page" — in the Queue and the Composer, with the technical id kept only as a tooltip.

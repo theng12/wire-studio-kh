@@ -21,6 +21,8 @@ pub struct TelegramSecrets {
 #[serde(default)]
 pub struct Secrets {
     pub telegram: TelegramSecrets,
+    /// The Gateway API key: one estate credential, never printed, never in a log line.
+    pub gateway_key: String,
     pub operator_token: String,
 }
 
@@ -28,6 +30,7 @@ impl Default for Secrets {
     fn default() -> Self {
         Self {
             telegram: TelegramSecrets::default(),
+            gateway_key: String::new(),
             operator_token: mint_token(),
         }
     }
@@ -205,6 +208,7 @@ mod tests {
                 bot_token: "abcd-efgh".into(),
                 allowed_user_ids: vec![],
             },
+            gateway_key: String::new(),
             operator_token: "op-9876".into(),
         };
         let line = "telegram abcd-efgh failed; operator op-9876";
