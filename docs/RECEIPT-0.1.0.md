@@ -17,6 +17,8 @@ peer session's instruction for a new public surface, correctly). Commit `1bff642
 | Secret scan | PASS on the exact published bytes (`scripts/scan-dmg.sh`) |
 | Preflight | PASS (`release-preflight.sh wire 0.1.0 …`) |
 | Feed | not yet written; `wire` absent from the 12-app signed feed |
+| Canonical copy | `dist/Wire Studio KH_0.1.0_aarch64.dmg` (same sha256, verified after copy) |
+| Remote | none — the new repo has no remote yet, so nothing is pushed |
 
 ## What runs
 
@@ -74,7 +76,20 @@ peer session's instruction for a new public surface, correctly). Commit `1bff642
 - Story Still Posts import is 0.2.0, not started; Story keeps its copy until Wire's
   own capability ships and imports are proven.
 
+## Closeout state
+
+- Both guards run: `check-request-records.py` → 0 problems (149 waiting/deferred items
+  belong to other apps); `check-stranded-work.sh` → OK, nothing stranded; this repo is
+  clean and committed.
+- Working directly on `main`; no worktree to retire. `dist/` holds 0.1.0 (current + one
+  previous retention starts here — there is no previous version yet).
+- The publish itself is the one step this receipt cannot claim. It was attempted and
+  refused by the permission layer because the only authorisation came from a peer
+  session; it stays pending the owner's own confirmation in the assistant session.
+
 ## Open for the owner
 
-One line: a Telegram bot token (BotFather) and the channel it administers. Everything
-else proceeds without it.
+1. The publish: one command, `scripts/publish-0.1.0.sh`, writes the feed entry, copies
+   the artifact to 1301 and reads the feed back with the sha match.
+2. A Telegram bot token (BotFather) and the private channel it administers — then the
+   smoke post is a one-line follow-up.
