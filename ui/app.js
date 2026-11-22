@@ -2,7 +2,7 @@
 
 (() => {
   // Fallback only: the core reports the real version and applyVersion() uses it.
-  let APP_VERSION = '0.4.3';
+  let APP_VERSION = '0.5.0';
   const WHATS_NEW = [
     'Settings now has a Gateway card: paste its address and key, press Connect, and Wire says exactly what Gateway answered — "connected · 51 models available", an empty catalogue, or Gateway\'s own refusal.',
     'A saved Gateway key that stops working says so in Gateway\'s words and offers Check connection, instead of pretending it is connected.',

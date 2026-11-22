@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0 — 2026-11-22
+
+- **Products from Media Studio, read-only.** Wire now reads Media Studio's catalogue straight from its own store — nothing is copied and nothing is written to it. The Import screen lists your active products with their price and the time that price was read ("price as of 12:34"), searchable by name or SKU. Archived products are not listed.
+- **Attach a product to a post.** The Composer has a product picker. The chosen product's name and price appear under the field and in the preview line, and the post can still be queued without one.
+- **The price is read again at send.** If a price changed between composing and sending, the sent text carries the new price with the time it was read — never a frozen one. The queue keeps both numbers: the price you were shown and the price that was sent, so a change is visible rather than silent.
+- **Honest prices.** No currency symbol is invented (Media records none), a product with no price says "price unavailable", and a store that cannot be read says why instead of showing an empty list or a zero.
+- Wire reads Media's store read-only: the main database file's bytes and modification time are checked before and after, and the proof also shows Wire writes nothing to the write-ahead log.
+
 ## 0.4.3 — 2026-11-22
 
 - Settings has a **Gateway** card: paste Gateway's address and API key and press **Connect**. Wire asks Gateway for its live model list and says exactly what came back — "connected · 51 models available", "connected · no models published yet", or Gateway's own words, for example "Invalid API key.".
