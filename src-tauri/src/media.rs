@@ -97,23 +97,27 @@ pub fn read(data_dir: &Path, limit: usize) -> MediaRead {
         .as_ref()
         .map(|p| p.display().to_string())
         .unwrap_or_default();
-    let mut found = false;
-    let mut reason = String::new();
     let mut rows_out = Vec::new();
-    match store {
-        None => reason = "No Media Studio store was found in the usual places.".into(),
-        Some(path) if !path.is_file() => {
-            reason = format!("No Media Studio store at {}.", path.display());
-        }
+    let (found, reason) = match store {
+        None => (
+            false,
+            "No Media Studio store was found in the usual places.".to_string(),
+        ),
+        Some(path) if !path.is_file() => (
+            false,
+            format!("No Media Studio store at {}.", path.display()),
+        ),
         Some(path) => match open_read_only(&path).and_then(|conn| products(&conn, limit)) {
             Ok(rows) => {
-                found = true;
-                reason = format!("{} active products.", rows.len());
                 rows_out = rows;
+                (true, format!("{} active products.", rows_out.len()))
             }
-            Err(error) => reason = format!("Could not read {}: {error}", path.display()),
+            Err(error) => (
+                false,
+                format!("Could not read {}: {error}", path.display()),
+            ),
         },
-    }
+    };
     MediaRead {
         configured: !configured.is_empty(),
         path: path_text,
