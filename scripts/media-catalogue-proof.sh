@@ -157,9 +157,18 @@ t_change="$(date -u +%s)"
 python3 -I -c '
 import sqlite3, sys
 db = sqlite3.connect(sys.argv[1]); db.execute("UPDATE products SET price_retail=15.75, updated_at=1 WHERE id=?", ("p1",)); db.commit(); db.close()' "$store"
-changed="$(store_state)"
-[ "$changed" != "$before" ] && pass "the stub catalogue's price changed (by the test, not by Wire)" \
-  || bad "the stub catalogue's price changed (by the test, not by Wire)" "hash unchanged"
+# With a live WAL the write lands in -wal, not in the main file, so a changed main hash is the
+# wrong test. Prove the change through the reader, and keep the -wal hash as the not-written check.
+wal_hash() { shasum -a 256 "$tmp/media/database.sqlite-wal" 2>/dev/null | awk '{print $1}'; }
+trigger media-products '{"limit":10}' "$tmp/after-change" >/dev/null
+price_now="$(python3 -I -c '
+import json,sys
+rows=json.load(open(sys.argv[1])).get("products") or []
+row=[r for r in rows if r.get("id")=="p1"]
+print(row[0].get("price_retail") if row else "missing")' "$tmp/after-change" 2>/dev/null)"
+[ "$price_now" = "15.75" ] && pass "the catalogue reads the changed price (by the test, not by Wire)" \
+  || bad "the catalogue reads the changed price (by the test, not by Wire)" "price=$price_now"
+pre_send="$(store_state)"; pre_send_wal="$(wal_hash)"
 code="$(trigger preview-send "{\"id\":\"$row\"}" "$tmp/preview")"
 text="$(field "$tmp/preview" text)"
 case "$text" in
@@ -203,8 +212,10 @@ ASOF
 [ "$as_of_verdict" = "ok" ] && pass "the as-of time is the second read and matches the text's clock" \
   || bad "the as-of time is the second read and matches the text's clock" "$as_of_verdict"
 after_send="$(store_state)"
-[ "$after_send" = "$changed" ] && pass "Media's store is still byte-identical after the send-path read" \
-  || bad "Media's store is still byte-identical after the send-path read" "changed=[$changed] after=[$after_send]"
+[ "$after_send" = "$pre_send" ] && pass "Media's main file is unchanged across the send-path read" \
+  || bad "Media's main file is unchanged across the send-path read" "before=[$pre_send] after=[$after_send]"
+[ "$(wal_hash)" = "$pre_send_wal" ] && pass "Media's -wal is unchanged across the send-path read (Wire wrote nothing)" \
+  || bad "Media's -wal is unchanged across the send-path read (Wire wrote nothing)" "before=[$pre_send_wal] after=[$(wal_hash)]"
 
 # 4b — a product with no price says so; never $0, never a guessed symbol.
 trigger schedule '{"text":"Unpriced post","targets":["telegram:TESTCHAT"],"product_id":"p4"}' "$tmp/queued-null" >/dev/null
