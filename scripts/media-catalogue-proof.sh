@@ -153,6 +153,7 @@ print(row[0].get("price_shown") if row else "missing")' "$tmp/state" "$row" 2>/d
 
 # 3/4 — change the price 2 s before send; the text that will be sent carries the new one.
 sleep 2
+t_change="$(date -u +%s)"
 python3 -I -c '
 import sqlite3, sys
 db = sqlite3.connect(sys.argv[1]); db.execute("UPDATE products SET price_retail=15.75, updated_at=1 WHERE id=?", ("p1",)); db.commit(); db.close()' "$store"
@@ -177,6 +178,30 @@ row=[r for r in rows if r.get("id")==sys.argv[2]]
 print(row[0].get("price_sent") if row else "missing")' "$tmp/state2" "$row" 2>/dev/null)"
 [ "$sent" = "15.75" ] && pass "the row records the sent price beside the shown one" \
   || bad "the row records the sent price beside the shown one" "price_sent=$sent"
+as_of="$(python3 -I -c '
+import json,sys
+rows=json.load(open(sys.argv[1])).get("deliveries") or []
+row=[r for r in rows if r.get("id")==sys.argv[2]]
+print(row[0].get("price_as_of") if row else "")' "$tmp/state2" "$row" 2>/dev/null)"
+as_of_verdict="$(python3 -I - "$as_of" "$t_change" "$text" <<'ASOF'
+import datetime, re, sys
+raw, changed, text = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+try:
+    stamp = datetime.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+except Exception:
+    print("unparseable:" + raw); raise SystemExit
+if stamp.timestamp() < changed:
+    print("older-than-the-change:" + raw); raise SystemExit
+# The text names the same minute, in Phnom Penh time like every other stamp in the app.
+local = stamp.astimezone(datetime.timezone(datetime.timedelta(hours=7))).strftime("%H:%M")
+shown = re.search(r"\(as of ([0-9]{2}:[0-9]{2})\)", text)
+if not shown:
+    print("text-has-no-as-of"); raise SystemExit
+print("ok" if shown.group(1) == local else f"text-says-{shown.group(1)}-row-says-{local}")
+ASOF
+)"
+[ "$as_of_verdict" = "ok" ] && pass "the as-of time is the second read and matches the text's clock" \
+  || bad "the as-of time is the second read and matches the text's clock" "$as_of_verdict"
 after_send="$(store_state)"
 [ "$after_send" = "$changed" ] && pass "Media's store is still byte-identical after the send-path read" \
   || bad "Media's store is still byte-identical after the send-path read" "changed=[$changed] after=[$after_send]"
