@@ -109,6 +109,7 @@ pub fn queue_post(
     targets: Vec<String>,
     delay_s: i64,
     presets: Option<std::collections::HashMap<String, String>>,
+    product_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     let text = text.trim().to_string();
     if text.is_empty() {
@@ -121,9 +122,14 @@ pub fn queue_post(
         .iter()
         .map(|target| (target.clone(), presets.as_ref().and_then(|m| m.get(target)).cloned()))
         .collect();
+    // The price shown at compose time comes from Media now, read-only. A product that cannot be
+    // read is still recorded by id: the send path then says the price is unavailable, with why.
+    let product = product_id
+        .as_deref()
+        .map(|id| (id, crate::media::product(&s.data_dir, id).ok().and_then(|p| p.price_retail)));
     let created = {
         let mut store = s.store.lock().map_err(|_| "queue busy".to_string())?;
-        let (post_id, ids) = store.create_post_with_presets(&text, &choices).map_err(err)?;
+        let (post_id, ids) = store.create_post_with_presets(&text, &choices, product).map_err(err)?;
         if delay_s > 0 {
             let at = chrono::Utc::now() + chrono::Duration::seconds(delay_s);
             store.set_next_attempt_for_post(&post_id, at).map_err(err)?;

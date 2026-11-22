@@ -139,7 +139,9 @@ after_read="$(store_state)"
 printf 'NOTE sidecars beside the store after Wire reads: %s\n' "$(ls "$tmp/media" | tr '\n' ' ')"
 
 # 2 — attach the product to a queued post; the shown price is recorded.
-code="$(trigger schedule '{"text":"New scarf colours are in","targets":["telegram:TESTCHAT"],"product_id":"p1"}' "$tmp/queued")"
+code="$(# Delayed on purpose: the dispatch loop must not claim it before the test changes the price, so
+# the send path really reads the second price. `send-now` brings it forward after the change.
+trigger schedule '{"text":"New scarf colours are in","targets":["telegram:TESTCHAT"],"product_id":"p1","delay_s":300}' "$tmp/queued")"
 row="$(field "$tmp/queued" delivery_ids.0)"
 [ -n "$row" ] && pass "a post with a product is queued" || bad "a post with a product is queued" "HTTP $code body=$(cat "$tmp/queued" 2>/dev/null)"
 curl -sS -m 5 -o "$tmp/state" "$url/api/test/state" >/dev/null 2>&1
@@ -179,7 +181,19 @@ case "$text" in
   *"(as of "*) pass "the sent text names when the price was read" ;;
   *) bad "the sent text names when the price was read" "text=$text" ;;
 esac
-curl -sS -m 5 -o "$tmp/state2" "$url/api/test/state" >/dev/null 2>&1
+# The row records the sent price when the real dispatch runs, not at preview time. Let it run and
+# wait for the write; the send itself fails (no token) and that is irrelevant to what was recorded.
+trigger send-now "{\"id\":\"$row\"}" "$tmp/sent-now" >/dev/null
+for _ in $(seq 1 100); do
+  curl -sS -m 5 -o "$tmp/state2" "$url/api/test/state" >/dev/null 2>&1
+  sent_probe="$(python3 -I -c '
+import json,sys
+rows=json.load(open(sys.argv[1])).get("deliveries") or []
+row=[r for r in rows if r.get("id")==sys.argv[2]]
+print("" if not row or row[0].get("price_sent") is None else row[0].get("price_sent"))' "$tmp/state2" "$row" 2>/dev/null)"
+  [ -n "$sent_probe" ] && break
+  sleep 0.1
+done
 sent="$(python3 -I -c '
 import json,sys
 rows=json.load(open(sys.argv[1])).get("deliveries") or []

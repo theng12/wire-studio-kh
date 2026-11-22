@@ -84,7 +84,7 @@ pub struct MediaRead {
     pub products: Vec<Product>,
 }
 
-pub fn read(data_dir: &Path, limit: usize) -> MediaRead {
+fn resolve(data_dir: &Path) -> (String, Option<PathBuf>) {
     let cfg = crate::settings::load(&crate::settings::path_in(data_dir));
     let configured = cfg.media_store_path.trim().to_string();
     // Empty means discover; a saved path is used as saved. Nothing is created or written.
@@ -93,6 +93,11 @@ pub fn read(data_dir: &Path, limit: usize) -> MediaRead {
     } else {
         Some(PathBuf::from(&configured))
     };
+    (configured, store)
+}
+
+pub fn read(data_dir: &Path, limit: usize) -> MediaRead {
+    let (configured, store) = resolve(data_dir);
     let path_text = store
         .as_ref()
         .map(|p| p.display().to_string())
@@ -130,14 +135,41 @@ pub fn read(data_dir: &Path, limit: usize) -> MediaRead {
 
 /// The `state` doorway's small block — the same read, no rows attached.
 pub fn status_json(data_dir: &Path) -> serde_json::Value {
-    let read = read(data_dir, 0);
+    // A path check only: `state` refreshes often and must never open Media's store for nothing.
+    let (configured, store) = resolve(data_dir);
+    let path_text = store.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+    let found = store.as_ref().map(|p| p.is_file()).unwrap_or(false);
     serde_json::json!({
-        "configured": read.configured,
-        "path": read.path,
-        "found": read.found,
-        "state": read.state,
-        "reason": read.reason,
+        "configured": !configured.is_empty(),
+        "path": path_text,
+        "found": found,
+        "state": crate::settings::media_status(&configured, found),
     })
+}
+
+/// One product as it is right now: the compose path records its price, the send path re-reads it.
+pub fn product(data_dir: &Path, id: &str) -> Result<Product, String> {
+    let (_, store) = resolve(data_dir);
+    let path = store.ok_or_else(|| "No Media Studio store was found.".to_string())?;
+    if !path.is_file() {
+        return Err(format!("No Media Studio store at {}.", path.display()));
+    }
+    let conn = open_read_only(&path)?;
+    conn.query_row(
+        "SELECT id, sku, name, price_retail, status, updated_at FROM products WHERE id = ?1",
+        [id],
+        |row| {
+            Ok(Product {
+                id: row.get(0)?,
+                sku: row.get(1)?,
+                name: row.get(2)?,
+                price_retail: row.get(3)?,
+                status: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        },
+    )
+    .map_err(|error| format!("Could not read {}: {error}", path.display()))
 }
 
 /// The full answer for `media_products` and `save_media_path`.

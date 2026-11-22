@@ -13,7 +13,7 @@ use super::scheduler::{backoff_delay, MAX_ATTEMPTS};
 #[cfg(test)]
 use super::scheduler::backoff_base_secs;
 
-const SCHEMA_VERSION: i64 = 2;
+const SCHEMA_VERSION: i64 = 3;
 
 const SCHEMA_V1: &str = "
 CREATE TABLE posts (
@@ -46,6 +46,15 @@ CREATE INDEX idx_deliveries_due ON deliveries(state, next_attempt_at);
 
 // v2: fan-out is one row per (target, preset), so uniqueness grows a preset
 // column. Existing rows copy over with a NULL preset.
+/// v3 keeps four facts per delivery: which product, the price shown when composed, the price read
+/// at send, and when that second read happened. Additive, so a v2 database upgrades in place.
+const SCHEMA_V3_PRODUCT: &str = "
+ALTER TABLE deliveries ADD COLUMN product_id TEXT;
+ALTER TABLE deliveries ADD COLUMN price_shown REAL;
+ALTER TABLE deliveries ADD COLUMN price_sent REAL;
+ALTER TABLE deliveries ADD COLUMN price_as_of TEXT;
+";
+
 const SCHEMA_V2_DELIVERIES: &str = "
 ALTER TABLE deliveries RENAME TO deliveries_v1;
 CREATE TABLE deliveries (
@@ -177,6 +186,15 @@ impl Store {
                 [],
             )?;
         }
+        // v3: the Business batch. A delivery can carry one Media product; the price shown when the
+        // post was composed and the price read at send are kept separately, so a change is visible.
+        if version < 3 {
+            tx.execute_batch(SCHEMA_V3_PRODUCT)?;
+            tx.execute(
+                "UPDATE meta SET value = '3' WHERE key = 'schema_version'",
+                [],
+            )?;
+        }
         tx.commit()
     }
 
@@ -195,7 +213,7 @@ impl Store {
                 (target.clone(), preset)
             })
             .collect();
-        self.create_post_with_presets(text, &choices)
+        self.create_post_with_presets(text, &choices, None)
     }
 
     /// One authored variant fans out to one delivery row per (target, preset).
@@ -203,6 +221,7 @@ impl Store {
         &mut self,
         text: &str,
         choices: &[(String, Option<String>)],
+        product: Option<(&str, Option<f64>)>,
     ) -> rusqlite::Result<(String, Vec<String>)> {
         // Validate every pair first: a bad preset refuses the whole post,
         // never a half-written row.
@@ -237,9 +256,17 @@ impl Store {
             let id = Uuid::new_v4().to_string();
             tx.execute(
                 "INSERT INTO deliveries (id, post_id, target, state, attempts, \
-                 next_attempt_at, scheduled_at, created_at, preset) \
-                 VALUES (?1, ?2, ?3, 'pending', 0, ?4, ?4, ?4, ?5)",
-                params![id, post_id, target, now, preset],
+                 next_attempt_at, scheduled_at, created_at, preset, product_id, price_shown) \
+                 VALUES (?1, ?2, ?3, 'pending', 0, ?4, ?4, ?4, ?5, ?6, ?7)",
+                params![
+                    id,
+                    post_id,
+                    target,
+                    now,
+                    preset,
+                    product.map(|(id, _)| id),
+                    product.and_then(|(_, price)| price),
+                ],
             )?;
             delivery_ids.push(id);
         }
@@ -251,18 +278,19 @@ impl Store {
     pub fn claim_due(&mut self, now: DateTime<Utc>) -> rusqlite::Result<Option<Claim>> {
         let now_s = iso(now);
         let tx = self.conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let due: Option<(String, String, String, String, Option<String>, i64)> = tx
+        let due: Option<(String, String, String, String, Option<String>, i64, Option<String>, Option<f64>)> = tx
             .query_row(
                 "SELECT d.id, d.post_id, d.target, p.text, d.preset, \
-                 CAST(MAX(0, (julianday(?1) - julianday(d.scheduled_at)) * 1440) AS INTEGER) \
+                 CAST(MAX(0, (julianday(?1) - julianday(d.scheduled_at)) * 1440) AS INTEGER), \
+                 d.product_id, d.price_shown \
                  FROM deliveries d JOIN posts p ON p.id = d.post_id \
                  WHERE d.state = 'pending' AND d.next_attempt_at <= ?1 \
                  ORDER BY d.next_attempt_at, d.rowid LIMIT 1",
                 params![now_s],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?)),
             )
             .optional()?;
-        let Some((id, post_id, target, text, preset, late_minutes)) = due else {
+        let Some((id, post_id, target, text, preset, late_minutes, product_id, price_shown)) = due else {
             return Ok(None);
         };
         tx.execute(
@@ -272,7 +300,54 @@ impl Store {
             params![now_s, late_minutes, id],
         )?;
         tx.commit()?;
-        Ok(Some(Claim { delivery_id: id, post_id, target, text, preset }))
+        Ok(Some(Claim { delivery_id: id, post_id, target, text, preset, product_id, price_shown }))
+    }
+
+    /// Bring one delivery forward to now, so the dispatch loop picks it on its next pass. Test-only
+    /// entry point; the scheduler is the only thing that moves this in the app.
+    pub fn make_due(&mut self, delivery_id: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE deliveries SET next_attempt_at = ?1 WHERE id = ?2",
+            params![iso(Utc::now()), delivery_id],
+        )?;
+        Ok(())
+    }
+
+    /// The row as a claim, without claiming it: what the send path would publish right now.
+    pub fn preview_claim(&self, delivery_id: &str) -> rusqlite::Result<Option<Claim>> {
+        self.conn
+            .query_row(
+                "SELECT d.id, d.post_id, d.target, p.text, d.preset, d.product_id, d.price_shown \
+                 FROM deliveries d JOIN posts p ON p.id = d.post_id WHERE d.id = ?1",
+                params![delivery_id],
+                |r| {
+                    Ok(Claim {
+                        delivery_id: r.get(0)?,
+                        post_id: r.get(1)?,
+                        target: r.get(2)?,
+                        text: r.get(3)?,
+                        preset: r.get(4)?,
+                        product_id: r.get(5)?,
+                        price_shown: r.get(6)?,
+                    })
+                },
+            )
+            .optional()
+    }
+
+    /// The price actually read at send, and when. Recorded whether the publish then fails or not:
+    /// the row is a record of what was sent, not of what succeeded.
+    pub fn record_sent_price(
+        &mut self,
+        delivery_id: &str,
+        price: Option<f64>,
+        as_of: &str,
+    ) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE deliveries SET price_sent = ?1, price_as_of = ?2 WHERE id = ?3",
+            params![price, as_of, delivery_id],
+        )?;
+        Ok(())
     }
 
     pub fn mark_sent(
@@ -393,7 +468,7 @@ impl Store {
         let mut stmt = self.conn.prepare(
             "SELECT d.id, d.post_id, p.text, d.target, d.preset, d.state, d.attempts, \
              d.next_attempt_at, d.last_error, d.attention, d.remote_id, d.remote_url, \
-             d.sent_late_minutes \
+             d.sent_late_minutes, d.product_id, d.price_shown, d.price_sent, d.price_as_of \
              FROM deliveries d JOIN posts p ON p.id = d.post_id ORDER BY d.rowid DESC",
         )?;
         let rows = stmt.query_map([], |r| {
@@ -423,6 +498,10 @@ impl Store {
                 remote_id: r.get(10)?,
                 remote_url: r.get(11)?,
                 sent_late_minutes: r.get(12)?,
+                product_id: r.get(13)?,
+                price_shown: r.get(14)?,
+                price_sent: r.get(15)?,
+                price_as_of: r.get(16)?,
             })
         })?;
         rows.collect()
@@ -643,7 +722,7 @@ mod tests {
                     |r| r.get(0),
                 )
                 .unwrap();
-            assert_eq!(version, "2");
+            assert_eq!(version, "3");
             let preset: Option<String> = store
                 .conn
                 .query_row("SELECT preset FROM deliveries WHERE id = 'd1'", [], |r| {
@@ -651,6 +730,12 @@ mod tests {
                 })
                 .unwrap();
             assert_eq!(preset, None, "v1 rows keep a NULL preset");
+            // v3 adds the product columns; an old row keeps them NULL and still reads.
+            let product: Option<String> = store
+                .conn
+                .query_row("SELECT product_id FROM deliveries WHERE id = 'd1'", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(product, None, "a v1 row has no product");
             let rows = store.queue_view().unwrap();
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].text, "old text");
@@ -670,7 +755,7 @@ mod tests {
             ("facebook_page:1".to_string(), Some("fb-4x5".to_string())),
             ("telegram:chat".to_string(), None),
         ];
-        let (_, ids) = store.create_post_with_presets("same text", &choices).unwrap();
+        let (_, ids) = store.create_post_with_presets("same text", &choices, None).unwrap();
         assert_eq!(ids.len(), 4, "one row per (target, preset)");
         let mut stored: Vec<(String, Option<String>)> = ids
             .iter()
@@ -702,6 +787,7 @@ mod tests {
                     ("youtube:chan".to_string(), Some("yt-16x9".to_string())),
                     ("youtube:chan".to_string(), Some("fb-1x1".to_string())),
                 ],
+                None,
             )
             .unwrap_err();
         let msg = err.to_string();
@@ -727,6 +813,7 @@ mod tests {
             .create_post_with_presets(
                 "hello",
                 &[("youtube:chan".to_string(), Some("nope".to_string()))],
+                None,
             )
             .unwrap_err();
         let msg = err.to_string();
@@ -769,6 +856,7 @@ mod tests {
                     ("youtube:chan".to_string(), Some("yt-shorts".to_string())),
                     ("chat".to_string(), None),
                 ],
+                None,
             )
             .unwrap();
         let first = store.claim_due(Utc::now()).unwrap().expect("first row due");

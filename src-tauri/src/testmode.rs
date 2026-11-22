@@ -223,11 +223,15 @@ fn schedule(state: &Shared, payload: Value) -> (u16, Value) {
             (t.clone(), preset)
         })
         .collect();
+    let product_id = payload.get("product_id").and_then(Value::as_str).map(str::to_string);
+    let product = product_id
+        .as_deref()
+        .map(|id| (id, crate::media::product(&state.data_dir, id).ok().and_then(|p| p.price_retail)));
     let created = {
         let mut store = guard(&state.store);
         let created = result_value(
             store
-                .create_post_with_presets(text, &choices)
+                .create_post_with_presets(text, &choices, product)
                 .map_err(|error| error.to_string()),
         );
         if let Ok(value) = &created {
@@ -541,6 +545,43 @@ fn media_path(state: &AppState, payload: Value) -> (u16, Value) {
     }
 }
 
+/// Let the real dispatch loop take one delivery now, so the send path runs end to end.
+fn send_now(state: &Shared, payload: Value) -> (u16, Value) {
+    let Some(id) = payload.get("id").and_then(Value::as_str) else {
+        return (400, json!({ "ok": false, "error": "id required" }));
+    };
+    let moved = {
+        let mut store = guard(&state.store);
+        store.make_due(id).map_err(|error| error.to_string())
+    };
+    match moved {
+        Ok(()) => {
+            state.wake();
+            (200, json!({ "ok": true, "id": id }))
+        }
+        Err(error) => (400, json!({ "ok": false, "error": error })),
+    }
+}
+
+/// What the send path would publish right now — same function, nothing sent.
+fn preview_send(state: &Shared, payload: Value) -> (u16, Value) {
+    let Some(id) = payload.get("id").and_then(Value::as_str) else {
+        return (400, json!({ "ok": false, "error": "id required" }));
+    };
+    let claim = {
+        let store = guard(&state.store);
+        store.preview_claim(id).ok().flatten()
+    };
+    let Some(claim) = claim else {
+        return (404, json!({ "ok": false, "error": format!("no delivery {id}") }));
+    };
+    let (text, price, as_of) = crate::dispatch::final_text(state, &claim);
+    (
+        200,
+        json!({ "ok": true, "id": id, "text": text, "price": price, "as_of": as_of }),
+    )
+}
+
 /// Bind loopback only; a bind failure is returned to main.rs instead of opening a window.
 pub fn serve(state: Shared, port: u16) -> Result<(), String> {
     let server = tiny_http::Server::http(("127.0.0.1", port))
@@ -570,6 +611,8 @@ pub fn serve(state: Shared, port: u16) -> Result<(), String> {
             ("POST", "/api/test/trigger/import") => "import",
             ("POST", "/api/test/trigger/gateway-save") => "gateway-save",
             ("POST", "/api/test/trigger/list-dirs") => "list-dirs",
+            ("POST", "/api/test/trigger/preview-send") => "preview-send",
+            ("POST", "/api/test/trigger/send-now") => "send-now",
             ("POST", "/api/test/trigger/media-products") => "media-products",
             ("POST", "/api/test/trigger/media-path") => "media-path",
             _ => {
@@ -606,6 +649,8 @@ pub fn serve(state: Shared, port: u16) -> Result<(), String> {
             "import" => import_channel(&state, payload),
             "gateway-save" => gateway_save(&state, payload),
             "list-dirs" => list_dirs(payload),
+            "preview-send" => preview_send(&state, payload),
+            "send-now" => send_now(&state, payload),
             "media-products" => media_products(&state, payload),
             "media-path" => media_path(&state, payload),
             _ => trigger(&state, payload, true),

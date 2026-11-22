@@ -120,12 +120,50 @@ impl DispatchError {
     }
 }
 
+/// The text actually sent: the caption, plus the product line built from a live read of Media.
+/// One function for the dispatch path and the headless preview, so they cannot drift.
+/// Returns (text, the price read now, the moment it was read — RFC3339 in Phnom Penh time).
+pub fn final_text(state: &Shared, claim: &crate::queue::Claim) -> (String, Option<f64>, Option<String>) {
+    let Some(id) = claim.product_id.as_deref() else {
+        return (claim.text.clone(), claim.price_shown, None);
+    };
+    let now = chrono::Utc::now();
+    let as_of = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, false);
+    let clock = now
+        .with_timezone(&chrono::FixedOffset::east_opt(7 * 3600).expect("UTC+7"))
+        .format("%H:%M")
+        .to_string();
+    match crate::media::product(&state.data_dir, id) {
+        Ok(product) => {
+            let line = match product.price_retail {
+                // No currency symbol: Media records no currency, and a guessed one would be a lie.
+                Some(price) => format!("{} · {} (as of {})", product.name, price, clock),
+                None => format!("{} · price unavailable (as of {})", product.name, clock),
+            };
+            (format!("{}\n\n{line}", claim.text), product.price_retail, Some(as_of))
+        }
+        Err(reason) => {
+            let line = format!("price unavailable — {reason} (as of {clock})");
+            (format!("{}\n\n{line}", claim.text), None, Some(as_of))
+        }
+    }
+}
+
 /// Publishes one claimed delivery. 0.1.0 has one platform (Telegram).
 fn publish(
     state: &Shared,
     rt: &tokio::runtime::Runtime,
     claim: &crate::queue::Claim,
 ) -> Result<(Option<String>, Option<String>), DispatchError> {
+    // Read the price and record what this attempt sends *before* any refusal: the row is a record
+    // of what the send path saw, not only of a successful publish.
+    let (text, price, as_of) = final_text(state, claim);
+    if let Some(stamp) = as_of.as_deref() {
+        if let Ok(mut store) = state.store.lock() {
+            let _ = store.record_sent_price(&claim.delivery_id, price, stamp);
+        }
+    }
+
     let (platform, chat_id) = match claim.target.split_once(':') {
         Some((p, rest)) => (p, rest.to_string()),
         None => (
@@ -152,7 +190,7 @@ fn publish(
     let adapter = TelegramAdapter::new(secrets.telegram.bot_token.clone());
     let payload = PublishPayload {
         target: chat_id,
-        text: claim.text.clone(),
+        text: text.clone(),
         media: None,
         dry_run: false,
     };

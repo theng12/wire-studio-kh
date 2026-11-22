@@ -32,16 +32,19 @@ impl Failure {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Claim {
     pub delivery_id: String,
     pub post_id: String,
     pub target: String,
     pub text: String,
     pub preset: Option<String>,
+    /// The Media product this delivery carries, and the price shown when it was composed.
+    pub product_id: Option<String>,
+    pub price_shown: Option<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DeliveryRow {
     pub id: String,
     pub post_id: String,
@@ -58,4 +61,8 @@ pub struct DeliveryRow {
     pub remote_id: Option<String>,
     pub remote_url: Option<String>,
     pub sent_late_minutes: Option<i64>,
+    pub product_id: Option<String>,
+    pub price_shown: Option<f64>,
+    pub price_sent: Option<f64>,
+    pub price_as_of: Option<String>,
 }
