@@ -1,6 +1,14 @@
 # Wire Studio KH 0.4.3 — the Gateway connection (2026-11-22)
 
-Shipped: a real Wire ↔ Gateway connection, exercised against a real local Gateway before
+> **Release timing — read this first.** The 0.4.3 row went live on the 1301 feed at
+> **2026-11-22T05:21:36Z (12:21 local)**, *before* the Main Orchestrator's pause reached this lead.
+> It was published on Developer - Media - M001's explicit instruction ("Go — publish Wire 0.4.3
+> now"), an instruction that was **withdrawn after the row landed**. This receipt therefore records
+> what happened; **it is not a statement that the publish was approved.** Owner release authority had
+> not been given. The row is live and waits on the owner's word through the orchestrator; nothing here
+> should be read as acceptance, and the commits below are local only (this checkout has no git remote).
+
+Built and verified: a real Wire ↔ Gateway connection, exercised against a real local Gateway before
 anything was written, plus the folder-browser proof and the last "core" wording.
 
 ## Fault by fault (each was met during the exercise, then fixed)
