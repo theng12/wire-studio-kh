@@ -24,7 +24,7 @@ import json, sys
 try:
     value = json.load(open(sys.argv[1]))
     for key in sys.argv[2].split("."):
-        value = value[key]
+        value = value[int(key)] if isinstance(value, list) else value[key]
     print(json.dumps(value, separators=(",", ":")) if isinstance(value, (list, dict)) else
           ("" if value is None else str(value).lower() if isinstance(value, bool) else str(value)))
 except Exception:
@@ -40,6 +40,7 @@ pid=""
 cleanup() {
   rc=$?
   [ -n "$pid" ] && kill -9 "$pid" 2>/dev/null
+  [ -n "${wal_pid:-}" ] && kill -9 "$wal_pid" 2>/dev/null
   wait 2>/dev/null
   rm -rf "$tmp"
   exit "$rc"
@@ -73,7 +74,27 @@ db.commit()
 db.close()
 PY
 store_state() { stat -f '%m %z' "$store"; shasum -a 256 "$store" | awk '{print $1}'; }
+# A live WAL: Media running with an open connection leaves -wal/-shm beside the file, which is the
+# case a read-only open can fail on. Hold one open for the whole proof.
+cat > "$tmp/wal-holder.py" <<'WALPY'
+import sqlite3, sys, time
+db = sqlite3.connect(sys.argv[1])
+db.execute("PRAGMA journal_mode=WAL")
+db.execute("INSERT INTO products (id, company_id, sku, name, status, price_retail, created_at, updated_at) "
+           "VALUES ('p4','c1','SKU-4','Unpriced Item','active',NULL,0,0)")
+db.commit()
+print("wal-held", flush=True)
+time.sleep(120)
+WALPY
+python3 -I "$tmp/wal-holder.py" "$store" > "$tmp/wal.log" 2>&1 &
+wal_pid=$!
+for _ in $(seq 1 50); do grep -q 'wal-held' "$tmp/wal.log" 2>/dev/null && break; sleep 0.1; done
 before="$(store_state)"
+if [ -e "$tmp/media/database.sqlite-wal" ]; then
+  pass "stub store is live: -wal present while a writer holds it open"
+else
+  bad "stub store is live: -wal present while a writer holds it open" "no -wal beside the store"
+fi
 pass "stub Media store written ($(wc -c < "$store" | tr -d ' ') bytes)"
 
 # ---------- Wire, hidden, own data dir ----------
@@ -106,19 +127,16 @@ code="$(trigger media-products '{"limit":10}' "$tmp/products")"
 count="$(python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); print(len(d.get("products") or []))' "$tmp/products" 2>/dev/null || echo 0)"
 name="$(field "$tmp/products" products.0.name)"
 price="$(field "$tmp/products" products.0.price_retail)"
-[ "$code" = "200" ] && [ "$count" = "2" ] && [ "$name" = "Krama Scarf" ] && [ "$price" = "12.5" ] \
-  && pass "two active products are listed, archived ones excluded, price read live" \
-  || bad "two active products are listed, archived ones excluded, price read live" "HTTP $code count=$count name=$name price=$price"
+[ "$code" = "200" ] && [ "$count" = "3" ] && [ "$name" = "Krama Scarf" ] && [ "$price" = "12.5" ] \
+  && pass "active products are listed, archived ones excluded, price read live" \
+  || bad "active products are listed, archived ones excluded, price read live" "HTTP $code count=$count name=$name price=$price"
 [ -n "$(field "$tmp/products" as_of)" ] && pass "the catalogue carries an as-of time" \
   || bad "the catalogue carries an as-of time" "as_of empty"
 after_read="$(store_state)"
 [ "$before" = "$after_read" ] && pass "Media's store is byte-identical after Wire reads it" \
   || bad "Media's store is byte-identical after Wire reads it" "before=[$before] after=[$after_read]"
-if ls "$tmp/media"/*-wal "$tmp/media"/*-shm >/dev/null 2>&1; then
-  bad "Wire creates no journal files beside Media's store" "$(ls "$tmp/media")"
-else
-  pass "Wire creates no journal files beside Media's store"
-fi
+# The assertion covers database.sqlite only (mtime + sha256). Sidecars are reported, not claimed.
+printf 'NOTE sidecars beside the store after Wire reads: %s\n' "$(ls "$tmp/media" | tr '\n' ' ')"
 
 # 2 — attach the product to a queued post; the shown price is recorded.
 code="$(trigger schedule '{"text":"New scarf colours are in","targets":["telegram:TESTCHAT"],"product_id":"p1"}' "$tmp/queued")"
@@ -162,6 +180,20 @@ print(row[0].get("price_sent") if row else "missing")' "$tmp/state2" "$row" 2>/d
 after_send="$(store_state)"
 [ "$after_send" = "$changed" ] && pass "Media's store is still byte-identical after the send-path read" \
   || bad "Media's store is still byte-identical after the send-path read" "changed=[$changed] after=[$after_send]"
+
+# 4b — a product with no price says so; never $0, never a guessed symbol.
+trigger schedule '{"text":"Unpriced post","targets":["telegram:TESTCHAT"],"product_id":"p4"}' "$tmp/queued-null" >/dev/null
+row_null="$(field "$tmp/queued-null" delivery_ids.0)"
+trigger preview-send "{\"id\":\"$row_null\"}" "$tmp/preview-null" >/dev/null
+text_null="$(field "$tmp/preview-null" text)"
+case "$text_null" in
+  *"price unavailable"*) pass "an unpriced product says the price is unavailable" ;;
+  *) bad "an unpriced product says the price is unavailable" "text=$text_null" ;;
+esac
+case "$text_null" in
+  *'$'*|*"0.00"*) bad "no invented currency symbol or zero" "text=$text_null" ;;
+  *) pass "no invented currency symbol or zero" ;;
+esac
 
 # 5 — honest states for a missing and an unreadable store.
 code="$(trigger media-path "{\"path\":\"$tmp/nowhere/database.sqlite\"}" "$tmp/missing")"
