@@ -96,6 +96,7 @@ pub fn state(s: State<'_, Shared>) -> Result<serde_json::Value, String> {
             "reason": reason,
         },
         "gateway": crate::gateway::status_json(&s.data_dir),
+        "media": crate::media::status_json(&s.data_dir),
         "appearance": cfg.appearance,
         "data_dir": s.data_dir.display().to_string(),
     }))
@@ -407,4 +408,19 @@ pub fn story_import_run(s: State<'_, Shared>, root: String) -> Result<serde_json
     let plan = crate::import::plan::scan(std::path::Path::new(&root))?;
     let report = crate::import::apply::apply(&plan, &s.data_dir)?;
     Ok(serde_json::json!({ "report": report }))
+}
+
+/// Read-only catalogue from Media Studio's own store. Same helper as the headless route.
+#[tauri::command]
+pub fn media_products(
+    s: State<'_, Shared>,
+    limit: Option<usize>,
+) -> Result<serde_json::Value, String> {
+    Ok(crate::media::products_json(&s.data_dir, limit.unwrap_or(crate::media::DEFAULT_LIMIT)))
+}
+
+/// Save where Media's store lives (empty = discover again); answers like `media_products`.
+#[tauri::command]
+pub fn save_media_path(s: State<'_, Shared>, path: String) -> Result<serde_json::Value, String> {
+    crate::media::save_path(&s.data_dir, &path)
 }

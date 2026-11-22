@@ -8,6 +8,7 @@ pub mod formats;
 pub mod gateway;
 pub mod hold;
 pub mod import;
+pub mod media;
 pub mod queue;
 pub mod secrets;
 pub mod settings;
@@ -107,6 +108,8 @@ pub fn run_app() {
             commands::story_import_preview,
             commands::story_import_run,
             commands::list_dirs,
+            commands::media_products,
+            commands::save_media_path,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Wire Studio KH");

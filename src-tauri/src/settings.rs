@@ -42,6 +42,8 @@ pub struct Settings {
     pub telegram_verified: Option<TelegramCheck>,
     /// The provider's own words when the last check failed; cleared on success.
     pub telegram_verify_error: String,
+    /// Media Studio's store to read from. Empty = discover the usual places.
+    pub media_store_path: String,
 }
 
 impl Default for Settings {
@@ -56,6 +58,7 @@ impl Default for Settings {
             appearance: "system".into(),
             telegram_verified: None,
             telegram_verify_error: String::new(),
+            media_store_path: String::new(),
         }
     }
 }
@@ -122,6 +125,18 @@ pub fn gateway_status(
     }
 }
 
+/// The Media reader's one-word state: a readable store is ready; a saved path with no
+/// readable store behind it is not_found; nothing saved and nothing discovered is not_configured.
+pub fn media_status(configured_path: &str, found: bool) -> &'static str {
+    if found {
+        "ready"
+    } else if configured_path.trim().is_empty() {
+        "not_configured"
+    } else {
+        "not_found"
+    }
+}
+
 pub fn path_in(data_dir: &Path) -> PathBuf {
     data_dir.join(SETTINGS_FILE)
 }
@@ -156,6 +171,14 @@ mod tests {
         assert_eq!(load(&p).telegram_chat, "@wire_smoke_test");
         assert_eq!(load(&p).telegram_verified, None);
         let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn media_status_reads_found_first() {
+        assert_eq!(media_status("", true), "ready");
+        assert_eq!(media_status("/some/store.sqlite", true), "ready");
+        assert_eq!(media_status("", false), "not_configured");
+        assert_eq!(media_status("/some/store.sqlite", false), "not_found");
     }
 
     #[test]

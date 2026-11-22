@@ -69,6 +69,7 @@
             <textarea id="postText" rows="7" placeholder="Write your post here…" spellcheck="true"></textarea>
             <p class="help">One caption per post. Video and image posts ship in a later build.</p>
             <p class="counter" id="charCount">0 characters</p>
+            <p class="help" id="productPreview" hidden></p>
           </div>
           <fieldset class="field">
             <legend>Send to</legend>
@@ -78,6 +79,14 @@
           <fieldset class="field" id="presetField" hidden>
             <legend>Presets</legend>
             <div class="preset-list" id="presetPickers"></div>
+          </fieldset>
+          <fieldset class="field" id="productField">
+            <legend>Product</legend>
+            <div class="actions">
+              <button class="button subtle" id="productChooseBtn" type="button">Choose product</button>
+              <button class="button subtle" id="productClearBtn" type="button" hidden>Clear choice</button>
+            </div>
+            <p class="help" id="productHelp">No product chosen.</p>
           </fieldset>
           <fieldset class="field">
             <legend>When</legend>
@@ -181,6 +190,21 @@
       </section>
 
       <section class="view" id="importView" aria-label="Import" hidden>
+        <div class="card">
+          <div class="card-head"><h2>Products (read-only)</h2><span class="chip" id="productsChip">not configured</span></div>
+          <p class="reason" id="productsReason">Set Media's data folder in Settings.</p>
+          <div class="setting-row">
+            <div><span class="field-label">Media data folder</span><p class="help" id="productsPath">Not reported</p></div>
+            <button class="button" id="productsReadBtn" type="button">Read products</button>
+          </div>
+          <div class="field compact">
+            <label class="visually-hidden" for="productsSearch">Search products</label>
+            <input type="search" id="productsSearch" placeholder="Search by name or SKU" autocomplete="off">
+            <p class="help">Filters the products that were read.</p>
+          </div>
+          <div id="productsList"></div>
+          <p class="help" id="productsAsOf" hidden></p>
+        </div>
         <div class="card">
           <div class="card-head"><h2>Channel folder</h2><span class="hint">Story stays untouched</span></div>
           <div class="field">

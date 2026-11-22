@@ -125,6 +125,7 @@ fn state_reply(state: &Shared) -> Value {
             "reason": reason,
         },
         "gateway": crate::gateway::status_json(&state.data_dir),
+        "media": crate::media::status_json(&state.data_dir),
     })
 }
 
@@ -522,6 +523,24 @@ fn telegram_use_channel(state: &AppState, payload: Value) -> (u16, Value) {
     (200, json!({ "ok": true, "chat": telegram_chat_json(&chat) }))
 }
 
+/// The headless twin of `commands::media_products`; the body may carry `{"limit": n}`.
+fn media_products(state: &AppState, payload: Value) -> (u16, Value) {
+    let limit = payload
+        .get("limit")
+        .and_then(Value::as_u64)
+        .unwrap_or(crate::media::DEFAULT_LIMIT as u64) as usize;
+    (200, crate::media::products_json(&state.data_dir, limit))
+}
+
+/// The headless twin of `commands::save_media_path`.
+fn media_path(state: &AppState, payload: Value) -> (u16, Value) {
+    let path = payload.get("path").and_then(Value::as_str).unwrap_or("");
+    match crate::media::save_path(&state.data_dir, path) {
+        Ok(reply) => (200, reply),
+        Err(error) => (400, json!({ "ok": false, "error": error })),
+    }
+}
+
 /// Bind loopback only; a bind failure is returned to main.rs instead of opening a window.
 pub fn serve(state: Shared, port: u16) -> Result<(), String> {
     let server = tiny_http::Server::http(("127.0.0.1", port))
@@ -551,6 +570,8 @@ pub fn serve(state: Shared, port: u16) -> Result<(), String> {
             ("POST", "/api/test/trigger/import") => "import",
             ("POST", "/api/test/trigger/gateway-save") => "gateway-save",
             ("POST", "/api/test/trigger/list-dirs") => "list-dirs",
+            ("POST", "/api/test/trigger/media-products") => "media-products",
+            ("POST", "/api/test/trigger/media-path") => "media-path",
             _ => {
                 let reason = format!("unknown route: {} {}", method.as_str(), path.as_str());
                 respond(request, 404, json!({ "ok": false, "error": reason }));
@@ -585,6 +606,8 @@ pub fn serve(state: Shared, port: u16) -> Result<(), String> {
             "import" => import_channel(&state, payload),
             "gateway-save" => gateway_save(&state, payload),
             "list-dirs" => list_dirs(payload),
+            "media-products" => media_products(&state, payload),
+            "media-path" => media_path(&state, payload),
             _ => trigger(&state, payload, true),
         };
         respond(request, status, reply);

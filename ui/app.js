@@ -19,7 +19,8 @@
     telegram_discover: ['POST', '/api/test/trigger/telegram-discover'],
     telegram_use_channel: ['POST', '/api/test/trigger/telegram-use-channel'],
     save_gateway: ['POST', '/api/test/trigger/gateway-save'],
-    list_dirs: ['POST', '/api/test/trigger/list-dirs']
+    list_dirs: ['POST', '/api/test/trigger/list-dirs'],
+    media_products: ['POST', '/api/test/trigger/media-products']
   };
   const SECTIONS = {
     composer: { eyebrow: 'Compose', title: 'Composer', subtitle: 'Write a text post, choose where it goes, and send it now or later.' },
@@ -57,6 +58,10 @@
   const presetSelections = {};
   let importPreview = null;
   let importBusy = null;
+  let productsRead = null;
+  let productsError = null;
+  let productsBusy = false;
+  let productChoice = null;
 
   const tauriBridge = window.__TAURI__ || null;
   const tauriInvoke = tauriBridge && (tauriBridge.core && tauriBridge.core.invoke || tauriBridge.invoke);
@@ -66,7 +71,8 @@
     return {
       dataDir: '', targets: [], deliveries: [], presets: [],
       telegram: { configured: false, connection: 'not_configured', chatId: '', last4: '', reason: '' },
-      gateway: { configured: false, connection: 'not_configured', url: '', last4: '', models: null, reason: '' }
+      gateway: { configured: false, connection: 'not_configured', url: '', last4: '', models: null, reason: '' },
+      media: { configured: false, path: '', found: false, state: '' }
     };
   }
 
@@ -325,6 +331,7 @@
       models: countOf(gatewayRaw.models),
       reason: String(gatewayRaw.reason || gatewayRaw.error || '')
     };
+    const mediaRaw = source.media && typeof source.media === 'object' ? source.media : {};
     return {
       version: String(source.version || ''),
       dataDir: String(source.data_dir || source.dataDir || ''),
@@ -333,6 +340,12 @@
       presets,
       telegram,
       gateway,
+      media: {
+        configured: Boolean(mediaRaw.configured),
+        path: String(mediaRaw.path || ''),
+        found: Boolean(mediaRaw.found),
+        state: String(mediaRaw.state || '')
+      },
       deliveries: deliveriesRaw.map(normalizeDelivery).map(row => ({
         ...row,
         targetName: targetLabel(row.target, telegram)
@@ -466,6 +479,8 @@
     renderQueue();
     renderTargets();
     renderSettings();
+    renderProducts();
+    updateProductField();
     $('#offlineBanner').hidden = connected;
     $('#offlineDetail').textContent = coreError || "Wire's own service did not answer.";
     $('#queueBtn').disabled = !connected || state.targets.length === 0;
@@ -1059,6 +1074,175 @@
     }
   }
 
+  /* ---------- Products (Media catalogue, read-only) ---------- */
+
+  function mediaStateLabel(media) {
+    if (media.state === 'ready') return 'connected';
+    if (media.state === 'not_found') return 'not found';
+    return 'not configured';
+  }
+
+  function mediaStateLevel(media) {
+    return media.state === 'ready' ? 'ok' : media.state === 'not_found' ? 'warn' : 'off';
+  }
+
+  function priceText(price) {
+    return price === null || price === undefined ? 'Not reported' : String(price);
+  }
+
+  function asOfText(iso) {
+    const when = parseWhen(iso);
+    return when ? TIME_ONLY_FMT.format(when) : 'an unknown time';
+  }
+
+  function normalizeProducts(raw) {
+    const data = unwrap(raw);
+    if (data.configured === false) return { blocked: "Set Media's data folder in Settings." };
+    if (data.found === false) return { blocked: 'That folder has no database.sqlite.' };
+    const list = Array.isArray(data.products) ? data.products : [];
+    return {
+      asOf: String(data.as_of || ''),
+      products: list.map(item => ({
+        id: String(item.id || ''),
+        sku: String(item.sku || ''),
+        name: String(item.name || ''),
+        price: item.price_retail === null || item.price_retail === undefined ? null : Number(item.price_retail)
+      })).filter(product => product.id)
+    };
+  }
+
+  async function readProducts() {
+    if (!connected) { setStatus('Wire is not answering — nothing was read', 'bad'); return; }
+    productsBusy = true;
+    renderProducts();
+    setStatus("Reading Media's products…", 'info');
+    try {
+      productsRead = normalizeProducts(await callCore('media_products'));
+      productsError = null;
+      const count = productsRead.products.length;
+      setStatus(count + ' product' + (count === 1 ? '' : 's') + ' read', 'ok');
+    } catch (err) {
+      productsRead = null;
+      productsError = message(err);
+      setStatus('Products could not be read', 'bad');
+    } finally {
+      productsBusy = false;
+      renderProducts();
+      updateProductField();
+    }
+  }
+
+  function renderProducts() {
+    const media = state.media;
+    const chip = $('#productsChip');
+    chip.textContent = mediaStateLabel(media);
+    chip.dataset.level = mediaStateLevel(media);
+    $('#productsPath').textContent = media.path || 'Not reported';
+    const button = $('#productsReadBtn');
+    button.disabled = !connected || productsBusy;
+    button.textContent = productsBusy ? 'Reading…' : 'Read products';
+    const host = $('#productsList');
+    const asOf = $('#productsAsOf');
+    host.replaceChildren();
+    if (productsError) {
+      asOf.hidden = true;
+      host.append(stateBlock('error', 'Products could not be read',
+        "Media's store could not be read: " + productsError, 'Try again', readProducts));
+      return;
+    }
+    if (productsRead && productsRead.blocked) {
+      asOf.hidden = true;
+      host.append(stateBlock('empty', 'Catalogue not available', productsRead.blocked));
+      return;
+    }
+    if (!productsRead) {
+      asOf.hidden = true;
+      host.append(stateBlock('empty', 'Not read yet',
+        media.state === 'ready'
+          ? 'Press Read products to list the catalogue.'
+          : "Media is not connected yet. Press Read products to check, or set Media's data folder in Settings."));
+      return;
+    }
+    const query = $('#productsSearch').value.trim().toLowerCase();
+    const rows = !query ? productsRead.products
+      : productsRead.products.filter(p => [p.name, p.sku].some(v => v.toLowerCase().includes(query)));
+    if (!rows.length) {
+      host.append(stateBlock('empty',
+        productsRead.products.length ? 'No matching products' : 'No products yet',
+        productsRead.products.length ? 'Try another search term.' : "Media's catalogue has no products yet."));
+    } else {
+      const body = el('tbody');
+      rows.forEach(p => body.append(el('tr', {},
+        el('td', { text: p.name || p.id }),
+        el('td', { class: 'mono', text: p.sku || 'Not reported' }),
+        el('td', { text: priceText(p.price) }))));
+      host.append(el('div', { class: 'table-wrap' }, el('table', {},
+        el('thead', {}, el('tr', {},
+          el('th', { text: 'Name' }), el('th', { text: 'SKU' }), el('th', { text: 'Price' }))), body)));
+    }
+    asOf.hidden = false;
+    asOf.textContent = 'price as of ' + asOfText(productsRead.asOf);
+  }
+
+  function productLine(choice) {
+    return choice.name + ' · ' + (choice.price === null ? 'no price' : String(choice.price));
+  }
+
+  function updateProductField() {
+    const choice = productChoice;
+    $('#productClearBtn').hidden = !choice;
+    const help = $('#productHelp');
+    if (choice) help.textContent = productLine(choice) + ' — as of ' + asOfText(choice.asOf);
+    else if (productsRead && productsRead.blocked || productsError) help.textContent = "Media's catalogue is not reachable — the post can still be queued without a product.";
+    else help.textContent = 'No product chosen.';
+    const preview = $('#productPreview');
+    preview.hidden = !choice;
+    preview.textContent = choice ? '— ' + productLine(choice) + ' (as of ' + asOfText(choice.asOf) + ')' : '';
+  }
+
+  function openProductDialog() {
+    const search = el('input', { type: 'search', id: 'productDialogSearch', placeholder: 'Search by name or SKU', autocomplete: 'off' });
+    const list = el('div', { class: 'folder-list', id: 'productDialogList', tabindex: '0' });
+    const dialog = openDialog({
+      title: 'Choose product',
+      meta: "Read-only from Media's catalogue. Pick one to attach to this post.",
+      body: el('div', { class: 'field compact' }, search, list),
+      confirmLabel: 'Done', cancelLabel: null,
+      initialFocus: '#productDialogSearch'
+    });
+
+    function paint() {
+      if (!productsRead || productsRead.blocked) {
+        list.replaceChildren(el('p', { class: 'help', text: "Media's catalogue could not be read. Close this dialog, press Read products on the Import page, then try again." }));
+        return;
+      }
+      const query = search.value.trim().toLowerCase();
+      const found = !query ? productsRead.products
+        : productsRead.products.filter(p => [p.name, p.sku].some(v => v.toLowerCase().includes(query)));
+      list.replaceChildren();
+      if (!found.length) {
+        list.append(el('p', { class: 'help', text: productsRead.products.length ? 'No matching products.' : "Media's catalogue has no products yet." }));
+        return;
+      }
+      found.forEach(p => list.append(el('button', { class: 'folder-row', type: 'button', on: { click: () => {
+        productChoice = { id: p.id, name: p.name || p.id, price: p.price, asOf: productsRead.asOf };
+        closeDialog(dialog);
+        updateProductField();
+        setStatus('Product attached: ' + (p.name || p.id), 'ok');
+      } } },
+        el('span', { text: p.name || p.id }),
+        el('span', { class: 'cell-note', text: (p.sku || 'no SKU') + ' · ' + (p.price === null ? 'no price' : String(p.price)) }))));
+    }
+
+    async function load() {
+      if (!productsRead && connected) await readProducts();
+      if (!dialog.overlay.isConnected) return;
+      paint();
+    }
+    search.addEventListener('input', paint);
+    load();
+  }
+
   /* ---------- Dialogs ---------- */
 
   function dialogError(panel, text) {
@@ -1217,13 +1401,17 @@
     button.disabled = true;
     button.textContent = 'Queueing…';
     const presets = selectedPresets(targets);
+    const args = { text, targets, delayS: schedule.delayS, presets };
+    if (productChoice) args.product_id = productChoice.id;
     try {
       try {
-        await callCore('queue_post', { text, targets, delayS: schedule.delayS, presets });
+        await callCore('queue_post', args);
       } catch (err) {
         // core predates the presets field: fall back to plain queue_post, and say so.
         if (!presetsRejected(err)) throw err;
-        await callCore('queue_post', { text, targets, delayS: schedule.delayS });
+        const plain = { text, targets, delayS: schedule.delayS };
+        if (productChoice) plain.product_id = productChoice.id;
+        await callCore('queue_post', plain);
         showToast('The core rejected presets; queued without them.');
       }
       $('#postText').value = '';
@@ -1412,6 +1600,10 @@
     $('#importChooseBtn').addEventListener('click', openFolderBrowser);
     $('#importCheckBtn').addEventListener('click', checkFolder);
     $('#importRunBtn').addEventListener('click', confirmImport);
+    $('#productsReadBtn').addEventListener('click', readProducts);
+    $('#productsSearch').addEventListener('input', renderProducts);
+    $('#productChooseBtn').addEventListener('click', openProductDialog);
+    $('#productClearBtn').addEventListener('click', () => { productChoice = null; updateProductField(); clearComposerError(); });
     $('#settingsTargetsBtn').addEventListener('click', () => showSection('targets'));
     $('#settingsUpdateBtn').addEventListener('click', updateDialog);
     $('#gatewayConnectBtn').addEventListener('click', gatewayConnect);
