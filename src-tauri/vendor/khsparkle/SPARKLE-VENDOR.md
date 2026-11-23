@@ -28,7 +28,7 @@ framework". Use `Versions/Current/…` or `Versions/B/…`.
 `codesign -dv --verbose=4 vendor/Sparkle.framework` reported:
 
 ```text
-Executable=$HOME/Developer/_orchestra/developer-system/sparkle-shim-20261123/vendor/Sparkle.framework/Versions/Current/Sparkle
+Executable=@rpath/Sparkle.framework/Versions/Current/Sparkle
 Identifier=org.sparkle-project.Sparkle
 Format=bundle with Mach-O universal (x86_64 arm64)
 CodeDirectory v=20500 size=1116 flags=0x10002(adhoc,runtime) hashes=28+3 location=embedded
