@@ -221,6 +221,14 @@ run_full() {
     bad "with neither file the hold refuses 401 loudly" "HTTP $code body=$(cat "$tmp/no-token" 2>/dev/null)"
   fi
   printf '%s' "$hold_token" > "$own_token"; chmod 600 "$own_token"
+  # The estate copy stays deleted from here on: Wire's own file must answer alone.
+  code="$(curl -sS -m 5 -o "$tmp/own-alone" -w '%{http_code}' -X POST "$full_hold_url" \
+    -H "x-hold-token: $hold_token" || true)"
+  if [ "$code" = "200" ] && [ ! -e "$legacy_token" ]; then
+    pass "Wire's own file answers alone once the estate copy is gone"
+  else
+    bad "Wire's own file answers alone once the estate copy is gone" "HTTP $code legacy=$( [ -e "$legacy_token" ] && echo present || echo absent)"
+  fi
   code="$(curl -sS -m 5 -o "$tmp/no-token" -w '%{http_code}' -X POST "$full_hold_url" || true)"
   if [ "$code" = "401" ] && [ "$(json_field "$tmp/no-token" error)" = "hold refused: token" ]; then
     pass "hold without a token refused 401"
