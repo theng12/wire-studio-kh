@@ -5,7 +5,11 @@
 # The EdDSA signature covers THESE exact DMG bytes: a re-cut DMG must regenerate its item, because
 # a stale signature fails silently — the app simply never updates.
 #
-#   bash scripts/appcast.sh "dist/Wire Studio KH_0.5.1_aarch64.dmg"
+#   bash scripts/appcast.sh "dist/Wire Studio KH_0.5.1_aarch64.dmg" [published-asset-url]
+#
+# Pass the URL GitHub actually stored when the release exists: it renames the asset to
+# `<sha-prefix>-<name with dots>` under the tag (wire-0.5.0 → 0.5.1). An enclosure built from the
+# local filename looks right and 404s. The signature covers the file bytes, not the URL.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -24,7 +28,7 @@ private_key="${WIRE_SPARKLE_PRIVATE:-$HOME/.kh-sparkle/com.terranash.wirestudiok
 chmod 600 "$private_key" 2>/dev/null || true
 
 asset="$(basename "$dmg" | tr ' ' '.')"
-url="https://github.com/theng12/wire-studio-kh/releases/download/wire-${version}/${asset}"
+url="${2:-https://github.com/theng12/wire-studio-kh/releases/download/wire-${version}/${asset}}"
 length="$(stat -f %z "$dmg")"
 
 # -p prints just the EdDSA signature; the appcast carries it as sparkle:edSignature.
