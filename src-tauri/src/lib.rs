@@ -77,6 +77,40 @@ pub fn start_hold(state: Shared, port: u16) {
     });
 }
 
+/// Sparkle through the shared shim (INTEGRATION.md §2). The shim owns the hold-then-check order and
+/// the no-UI driver; this file only starts it and logs a refusal with its reason.
+#[cfg(target_os = "macos")]
+mod sparkle {
+    extern "C" {
+        fn kh_sparkle_start() -> i32;
+        fn kh_sparkle_last_error() -> *const std::ffi::c_char;
+        fn kh_sparkle_set_state_callback(cb: extern "C" fn(i32));
+    }
+
+    extern "C" fn on_state(state: i32) {
+        // 2 = relaunching: the shim is about to terminate the app for the swap.
+        if state == 2 {
+            eprintln!("kh-sparkle: relaunching for an update");
+        }
+    }
+
+    pub fn start() {
+        unsafe {
+            kh_sparkle_set_state_callback(on_state);
+            let rc = kh_sparkle_start();
+            if rc != 0 {
+                let reason = std::ffi::CStr::from_ptr(kh_sparkle_last_error()).to_string_lossy();
+                eprintln!("kh-sparkle: refused: {reason}");
+            }
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+mod sparkle {
+    pub fn start() {}
+}
+
 /// The desktop app. One window, reopened from the app icon and the menu.
 pub fn run_app() {
     let state = init_state(&data_dir()).expect("core state");
@@ -113,6 +147,9 @@ pub fn run_app() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building Wire Studio KH");
+
+    // After the window exists, before anything else starts: the shim takes the hold first.
+    sparkle::start();
 
     app.run(|handle, event| {
         use tauri::Manager;

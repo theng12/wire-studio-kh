@@ -1,0 +1,4 @@
+# The test binary links Sparkle through the shim but is not inside a bundle, so dyld finds the
+# vendored framework here instead of at @executable_path/../Frameworks. Applied to every cargo run.
+[env]
+DYLD_FRAMEWORK_PATH = { value = "vendor/khsparkle", relative = true }

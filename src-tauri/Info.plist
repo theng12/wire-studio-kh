@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Sparkle through the shared shim (INTEGRATION.md §1). Tauri merges this file into the
+       generated Info.plist. SUPublicEDKey is written by scripts/build-release.sh from this app's own
+       key file at build time, so no private or public key is ever committed here. -->
+  <key>SUFeedURL</key>
+  <string>https://theng12.github.io/wire-studio-kh/appcast.xml</string>
+  <key>SUEnableAutomaticChecks</key>
+  <true/>
+  <key>KHHoldURL</key>
+  <string>http://127.0.0.1:8649/api/maintenance/hold</string>
+  <key>KHHoldTokenFile</key>
+  <string>~/Library/KHUpdater/hold-token</string>
+</dict>
+</plist>

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1 — 2026-11-23
+
+- **Wire updates itself.** The app now carries Sparkle, the studio's one update mechanism: it checks the signed appcast, downloads a newer version and swaps it in while the app is relaunched. There is no window, no prompt and nothing to click — the same behaviour as the other KH apps.
+- **The queue is held before anything is checked.** Wire first asks its own hold route to pause dispatch; only a hold that answers yes lets the check run. If the hold cannot be taken, the update is refused and the app keeps working.
+- **The hold now refuses an unauthenticated caller** with `401` instead of answering as if it were safe. A request with no token, or the wrong one, pauses nothing.
+- The app's signature covers Sparkle's framework and its nested helpers, verified with `--deep --strict` at build time and again inside the finished DMG.
+
 ## 0.5.0 — 2026-11-22
 
 - **Products from Media Studio, read-only.** Wire now reads Media Studio's catalogue straight from its own store — nothing is copied and nothing is written to it. The Import screen lists your active products with their price and the time that price was read ("price as of 12:34"), searchable by name or SKU. Archived products are not listed.

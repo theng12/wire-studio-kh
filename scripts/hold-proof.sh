@@ -184,18 +184,38 @@ run_full() {
     return 1
   fi
 
+  # The hold must refuse an unauthenticated caller with 401 and pause nothing (row 20261123-77):
+  # Sparkle checks the feed only after the hold, so a green light here would skip it.
   if [ -n "$hold_token" ]; then
-    pass "Launcher hold token file present; hold requires x-hold-token"
-    code="$(curl -sS -m 5 -o "$tmp/no-token" -w '%{http_code}' -X POST "$full_hold_url" || true)"
-    if [ "$code" = "403" ] && [ "$(json_field "$tmp/no-token" error)" = "hold refused: token" ]; then
-      pass "hold without x-hold-token refused when token file exists"
+    pass "Launcher hold token file present"
+  else
+    pass "Launcher hold token file absent — the hold must still refuse"
+  fi
+  code="$(curl -sS -m 5 -o "$tmp/no-token" -w '%{http_code}' -X POST "$full_hold_url" || true)"
+  if [ "$code" = "401" ] && [ "$(json_field "$tmp/no-token" error)" = "hold refused: token" ]; then
+    pass "hold without a token refused 401"
+  else
+    bad "hold without a token refused 401" "HTTP $code body=$(cat "$tmp/no-token" 2>/dev/null)"
+  fi
+  code="$(curl -sS -m 5 -o "$tmp/bad-token" -w '%{http_code}' -X POST "$full_hold_url" \
+    -H 'x-hold-token: not-the-token' || true)"
+  if [ "$code" = "401" ]; then
+    pass "hold with a wrong token refused 401"
+  else
+    bad "hold with a wrong token refused 401" "HTTP $code body=$(cat "$tmp/bad-token" 2>/dev/null)"
+  fi
+  if [ -n "$hold_token" ]; then
+    code="$(curl -sS -m 5 -o "$tmp/bearer" -w '%{http_code}' -X DELETE "$full_hold_url" \
+      -H "Authorization: Bearer $hold_token" || true)"
+    if [ "$code" = "200" ]; then
+      pass "hold accepts Authorization: Bearer with the same token (the shim's header)"
     else
-      bad "hold without x-hold-token refused when token file exists" "HTTP $code body=$(cat "$tmp/no-token" 2>/dev/null)"
+      bad "hold accepts Authorization: Bearer with the same token (the shim's header)" \
+        "HTTP $code body=$(cat "$tmp/bearer" 2>/dev/null)"
     fi
     code="$(curl -sS -m 5 -o "$tmp/origin" -w '%{http_code}' -X POST "$full_hold_url" \
       -H 'Origin: https://evil.example' -H "x-hold-token: $hold_token" || true)"
   else
-    pass "Launcher hold token file absent; hold fails open"
     code="$(curl -sS -m 5 -o "$tmp/origin" -w '%{http_code}' -X POST "$full_hold_url" \
       -H 'Origin: https://evil.example' || true)"
   fi

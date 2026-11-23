@@ -20,7 +20,6 @@ const MAX_TIMEOUT_S: u64 = 30;
 const DEFAULT_PAUSE_S: u64 = 120;
 const MIN_PAUSE_S: u64 = 1;
 const MAX_PAUSE_S: u64 = 900;
-static WARNED_NO_TOKEN: AtomicBool = AtomicBool::new(false);
 
 type Shared = Arc<AppState>;
 
@@ -28,7 +27,6 @@ type Shared = Arc<AppState>;
 enum TokenDecision {
     Allowed,
     Refused,
-    FailOpenLogged,
 }
 
 fn guard<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -92,13 +90,22 @@ fn origin_allowed(origin: Option<&str>) -> bool {
     matches!(origin, None | Some("tauri://localhost"))
 }
 
-/// No token file means fail open; the caller logs that fact once, not on every request.
+/// A missing or empty token file is a refusal, never a skipped hold (issue row 20261123-77): an
+/// unauthenticated caller must never receive a green light before Sparkle checks the feed.
 fn token_decision(header: Option<&str>, expected: Option<&str>) -> TokenDecision {
     match expected.filter(|token| !token.is_empty()) {
-        None => TokenDecision::FailOpenLogged,
+        None => TokenDecision::Refused,
         Some(expected) if token_eq(header.unwrap_or(""), expected) => TokenDecision::Allowed,
         Some(_) => TokenDecision::Refused,
     }
+}
+
+/// `Authorization: Bearer …` is how the Sparkle shim presents the same token (INTEGRATION §0).
+fn bearer_token(value: Option<&str>) -> Option<String> {
+    let value = value?.trim();
+    let rest = value.strip_prefix("Bearer ").or_else(|| value.strip_prefix("bearer "))?;
+    let token = rest.trim();
+    (!token.is_empty()).then(|| token.to_string())
 }
 
 fn pause_expired(paused_until: Option<DateTime<Utc>>, now: DateTime<Utc>) -> bool {
@@ -216,17 +223,13 @@ pub fn serve(state: Shared, port: u16) -> Result<(), String> {
         }
 
         let expected = launcher_token();
-        let decision = token_decision(header(&request, "x-hold-token").as_deref(), expected.as_deref());
+        let presented = header(&request, "x-hold-token")
+            .or_else(|| bearer_token(header(&request, "authorization").as_deref()));
+        let decision = token_decision(presented.as_deref(), expected.as_deref());
         if decision == TokenDecision::Refused {
-            respond(request, 403, json!({ "error": "hold refused: token" }));
+            // 401 with nothing paused: the caller then refuses its own update.
+            respond(request, 401, json!({ "error": "hold refused: token" }));
             continue;
-        }
-        if decision == TokenDecision::FailOpenLogged
-            && WARNED_NO_TOKEN
-                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                .is_ok()
-        {
-            eprintln!("hold unavailable — no Launcher token; update will be refused while running");
         }
 
         let (path, query) = request.url().split_once('?').unwrap_or((request.url(), ""));
@@ -270,13 +273,23 @@ mod tests {
 
     #[test]
     fn token_table() {
-        assert_eq!(token_decision(None, None), TokenDecision::FailOpenLogged);
-        assert_eq!(token_decision(Some("x"), None), TokenDecision::FailOpenLogged);
-        assert_eq!(token_decision(Some("x"), Some("")), TokenDecision::FailOpenLogged);
+        // No token file is a refusal, not a skipped hold (row 20261123-77).
+        assert_eq!(token_decision(None, None), TokenDecision::Refused);
+        assert_eq!(token_decision(Some("x"), None), TokenDecision::Refused);
+        assert_eq!(token_decision(Some("x"), Some("")), TokenDecision::Refused);
         assert_eq!(token_decision(Some("abc"), Some("abc")), TokenDecision::Allowed);
         assert_eq!(token_decision(None, Some("abc")), TokenDecision::Refused);
         assert_eq!(token_decision(Some("abc"), Some("ABD")), TokenDecision::Refused);
         assert!(!token_eq("abc", ""));
+    }
+
+    #[test]
+    fn bearer_token_table() {
+        assert_eq!(bearer_token(Some("Bearer abc")), Some("abc".to_string()));
+        assert_eq!(bearer_token(Some("bearer  abc ")), Some("abc".to_string()));
+        assert_eq!(bearer_token(Some("Basic abc")), None);
+        assert_eq!(bearer_token(Some("Bearer ")), None);
+        assert_eq!(bearer_token(None), None);
     }
 
     #[test]
