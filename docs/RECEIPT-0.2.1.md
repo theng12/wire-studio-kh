@@ -5,12 +5,12 @@ scan. 0.3.0 work continues separately and is not in this build.
 
 ## What was embedded, and what is not now
 
-0.2.0's binary carried **576 absolute `/build` paths** (cargo registry source
+0.2.0's binary carried **576 absolute `/Users/<name>` paths** (cargo registry source
 paths baked into dependency panic strings) at offsets around 7,368,000 in
 `Contents/MacOS/Wire Studio KH`. Anyone who downloaded the app could read them.
 
 Fix at the build, not the artifact:
-- Release build now sets `RUSTFLAGS="--remap-path-prefix=/build=/build
+- Release build now sets `RUSTFLAGS="--remap-path-prefix=$HOME=/build
   --remap-path-prefix=$TMPDIR=/tmp"`, so every embedded compile-time path is rewritten.
 - Release profile strips symbols (`strip = true`, no debug info).
 - Rebuilt from a clean worktree at the 0.2.0 commit (`fix/0.2.1-path-leak`, `b9675da`) so
@@ -34,7 +34,7 @@ Result: the 0.2.1 binary has **0 hits** under the precise rule below.
 Self-test (`scan-public.sh --self-test`), all six PASS: synthetic `/Users/x/y` caught;
 synthetic hostname caught; synthetic email caught; `com.terranash.wirestudiokh` allowed;
 icon filename not misread; reviewed third-party contact allowed. Against the shipped
-0.2.0 DMG the same scan reports **576 hits, every one `/build`** — the check
+0.2.0 DMG the same scan reports **576 hits, every one `/Users/<name>`** — the check
 catches a real leak and passes a clean build.
 
 ## Published artifact

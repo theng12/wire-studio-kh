@@ -4,7 +4,7 @@
 # Usage: import-route-proof.sh [channel-dir]
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-CHANNEL="${1:-/build/Developer/_orchestra/youtube-stack/wire-still-posts-fixture-20261121/little-weather-within}"
+CHANNEL="${1:-$HOME/Developer/_orchestra/youtube-stack/wire-still-posts-fixture-20261121/little-weather-within}"
 BIN="${WIRE_BIN:-$ROOT/src-tauri/target/debug/wire-studio-kh}"
 [ -x "$BIN" ] || { echo "FAIL binary missing: $BIN"; exit 1; }
 [ -d "$CHANNEL/still-posts/posts" ] || { echo "FAIL not a Still Posts channel: $CHANNEL"; exit 1; }

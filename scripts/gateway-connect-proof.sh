@@ -21,7 +21,7 @@ set -u
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 bin="${WIRE_BIN:-$root/src-tauri/target/debug/wire-studio-kh}"
 [ -x "$bin" ] || bin="$root/src-tauri/target/release/wire-studio-kh"
-gateway_repo="${GATEWAY_REPO:-/build/Developer/_graphs/gateway}"
+gateway_repo="${GATEWAY_REPO:-$HOME/Developer/_graphs/gateway}"
 py="${WIRE_GATEWAY_PY:-${TMPDIR:-/tmp}/wire-gateway-venv/bin/python}"
 
 fails=0

@@ -1,6 +1,6 @@
 # Story Studio KH → Wire Studio KH: Still Posts import spec
 
-Scope: read-only mapping; source-code claims checked 2026-11-21, production facts checked on story-mini 2026-11-21. `$STORY` = `/build/Developer/My Own Apps/story-studio-kh`; `$WIRE` = `/build/Developer/My Own Apps/wire-studio-kh`; `$DATA` = `~/Library/Application Support/Story Studio KH`; `$PLAN` = `/build/Developer/_orchestra/youtube-stack/wire-studio-scope/PLAN-V2.md`.
+Scope: read-only mapping; source-code claims checked 2026-11-21, production facts checked on story-mini 2026-11-21. `$STORY` = `$HOME/Developer/My Own Apps/story-studio-kh`; `$WIRE` = `$HOME/Developer/My Own Apps/wire-studio-kh`; `$DATA` = `~/Library/Application Support/Story Studio KH`; `$PLAN` = `$HOME/Developer/_orchestra/youtube-stack/wire-studio-scope/PLAN-V2.md`.
 
 ## 1. Storage map
 
@@ -9,7 +9,7 @@ Story has **no SQLite table for Still Posts** — JSON + PNG only (`$STORY/elect
 Resolution (global vs per-channel):
 - Data dir: `STORY_STUDIO_DATA_DIR` else Electron `app.getPath('userData')` else `$DATA` (`$STORY/electron/server/services/project-manager.ts:302-309`).
 - Library root: `app-settings.json → library_root` (legacy `projects_root_override`) else `<dataDir>/projects`; env override wins (`project-manager.ts:245-280,249-251`).
-- **verified on story-mini 2026-11-21:** production Library root is `/build/Documents/Story Studio KH/Story Studio Projects`; 31 live channels (32 folders, one `_trash`). The source-derived rule above is a fallback only when no production probe is supplied.
+- **verified on story-mini 2026-11-21:** production Library root is `<production home>/Documents/Story Studio KH/Story Studio Projects`; 31 live channels (32 folders, one `_trash`). The source-derived rule above is a fallback only when no production probe is supplied.
 - Channel = `<libraryRoot>/<slug>/` (`project-manager.ts:2001-2004`); settings `<channel>/config.json` (`project-manager.ts:1400-1403`); manifest `<channel>/project.json` (`project-manager.ts:599-600,849`).
 
 Per-channel files (exact paths; all under `<channel>/`):
@@ -105,6 +105,6 @@ PY
 ## 6. Inventory on THIS Mac
 
 - `$DATA` listed 2026-11-21: only Electron browser/cache/log folders (`Cache/`, `Code Cache/`, `GPUCache/`, `Local Storage/`, `Session Storage/`, `logs/`, Cookies/Preferences). No `projects/`, `app-settings.json`, `social/` or `app-secrets.json`, so the Library root cannot be resolved here (`project-manager.ts:245-280,302-309`).
-- `test-channel-kh`: not found under `/build/Developer` or `/build/Desktop`. **verified on story-mini 2026-11-21:** the real Still Posts channel is `little-weather-within`, not `test-channel-kh`.
+- `test-channel-kh`: not found under `~/Developer` or `~/Desktop`. **verified on story-mini 2026-11-21:** the real Still Posts channel is `little-weather-within`, not `test-channel-kh`.
 - Only local test data found: `/private/var/folders/qp/64pbc0jn23x2ytbmpzp0rxgm0000gn/T/story-e2e-1416-WoTnhn/` (`projects/e2e-project/project.json`, `jobs.json`, `app-settings.json`), with no `still-posts/` folder.
-- Live Still Posts channels discoverable from THIS Mac: **not found (0)**. The earlier claim that production's inventory "cannot be enumerated from here" remains true for this Mac, but production facts are now supplied: **verified on story-mini 2026-11-21** — root `/build/Documents/Story Studio KH/Story Studio Projects`, 31 live channels, Still Posts only in `little-weather-within` (9 posts). The gate must pass that root explicitly, never guess one.
+- Live Still Posts channels discoverable from THIS Mac: **not found (0)**. The earlier claim that production's inventory "cannot be enumerated from here" remains true for this Mac, but production facts are now supplied: **verified on story-mini 2026-11-21** — root `<production home>/Documents/Story Studio KH/Story Studio Projects`, 31 live channels, Still Posts only in `little-weather-within` (9 posts). The gate must pass that root explicitly, never guess one.

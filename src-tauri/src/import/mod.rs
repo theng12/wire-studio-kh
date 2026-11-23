@@ -290,7 +290,10 @@ mod tests {
     #[ignore]
     fn real_channel_report() {
         let root = std::env::var("STORY_REAL_CHANNEL").unwrap_or_else(|_| {
-            "/build/Developer/_orchestra/youtube-stack/wire-still-posts-fixture-20261121/little-weather-within".to_string()
+            format!(
+                "{}/Developer/_orchestra/youtube-stack/wire-still-posts-fixture-20261121/little-weather-within",
+                std::env::var("HOME").unwrap_or_default()
+            )
         });
         let plan = scan(std::path::Path::new(&root)).expect("scan the real channel");
         assert_eq!(plan.posts.len(), 9, "nine posts in little-weather-within");

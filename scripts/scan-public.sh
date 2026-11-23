@@ -3,21 +3,30 @@
 # exemption that keeps the rule usable.
 #
 # Fails on: absolute user paths (/Users/...), tailnet hostnames/URLs (*.ts.net,
-# terranash-*), personal email addresses, and key/token material.
-# Allows: the string "terranash" ONLY as part of "com.terranash." — the public
-# bundle id, which is on the feed and in every install BY DESIGN. This is an
-# exact-prefix exemption with its reason, not a blanket ignore of the word.
+# the fleet's host prefix below), personal email addresses, and key/token material.
+# Allows: that prefix ONLY as part of "com.<prefix>." — the public bundle id, which
+# is on the feed and in every install BY DESIGN. This is an exact-prefix exemption
+# with its reason, not a blanket ignore of the word.
+#
+# The host prefix below is the scanner's own pattern list: the one place in this repo
+# that must name the host shape. It is a deliberate exception to the path scrub, and
+# every match it finds is reported, never ignored.
 #
 # Usage: scan-public.sh <file-or-dmg> [more files...]
 #        scan-public.sh --self-test
 set -u
 
+HOST_PREFIX='terranash'
+export WIRE_HOST_PREFIX="$HOST_PREFIX"
+
 scan_python='
-import re, sys
+import os, re, sys
+HOST = os.environ.get("WIRE_HOST_PREFIX", "").encode()
 FORBIDDEN = [
     (re.compile(rb"/Users/[^/\x00\s\x22\x27]+"), "absolute user path"),
     (re.compile(rb"[A-Za-z0-9-]+\.ts\.net"), "tailnet hostname"),
-    (re.compile(rb"\bterranash-[A-Za-z0-9-]+"), "host name"),
+] + ([(re.compile(rb"\b" + HOST + rb"-[A-Za-z0-9-]+"), "host name")] if HOST else []) + [
+
     (re.compile(rb"[A-Za-z0-9._%+-]+@(?!.*\.(?:png|jpg|jpeg|gif|svg|icns))[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), "email address"),
     (re.compile(rb"bot[0-9]{8,}:[A-Za-z0-9_-]{30,}"), "telegram bot token"),
     (re.compile(rb"ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"), "github token"),
@@ -36,14 +45,14 @@ for path in sys.argv[1:]:
             if label == "email address" and m.group() in THIRD_PARTY:
                 continue
             hits.append((path, label, m.start(), m.group()[:60]))
-    # "terranash" is allowed only when the four bytes before it are "com."
+    # The prefix is allowed only when the four bytes before it are "com."
     start = 0
-    while True:
-        i = data.find(b"terranash", start)
+    while HOST:
+        i = data.find(HOST, start)
         if i < 0:
             break
         if data[max(0, i - 4):i] != b"com.":
-            hits.append((path, "terranash outside com.terranash.", i,
+            hits.append((path, "host prefix outside com.", i,
                          data[max(0, i - 12):i + 24]))
         start = i + 1
 for path, label, off, ctx in hits:
@@ -72,7 +81,7 @@ scan_one() {
 self_test() {
   local dir; dir="$(mktemp -d /tmp/wire-scan-test.XXXXXX)"
   printf '/Users/x/y' > "$dir/bad_path"
-  printf 'terranash-1301-m1-16-1000' > "$dir/bad_host"
+  printf '%s-1301-m1-16-1000' "$HOST_PREFIX" > "$dir/bad_host"
   printf 'someone@example.com' > "$dir/bad_email"
   printf 'com.terranash.wirestudiokh' > "$dir/good_bundle"
   printf '128x128@2x.pngicons' > "$dir/good_icon"

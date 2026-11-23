@@ -2,7 +2,8 @@
 # Wire Studio KH 0.2.0 gate config for gate-run.sh. A release adds a config, never a new gate script.
 
 APP="wire-studio-kh"
-WORKTREE="/build/Developer/My Own Apps/wire-studio-kh"
+# The checkout is the repo this config ships in, or WIRE_WORKTREE: a config carries no machine path.
+WORKTREE="${WIRE_WORKTREE:-$(git -C "${CFG:+$(dirname "$CFG")}" rev-parse --show-toplevel 2>/dev/null)}"
 export PATH="$HOME/.cargo/bin:$PATH"
 
 STEPS=(
