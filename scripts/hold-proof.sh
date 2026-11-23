@@ -91,9 +91,13 @@ expiry_hold_url="$hold_base?timeout_s=20&pause_s=2"
 # a refusal (row 20261123-77). The proof owns a temp HOME with a token so it tests the real contract
 # without depending on whether this Mac's Launcher has written one.
 hold_token="wire-hold-proof-$$"
-mkdir -p "$tmp/home/Library/KHUpdater"
-printf '%s' "$hold_token" > "$tmp/home/Library/KHUpdater/hold-token"
-chmod 600 "$tmp/home/Library/KHUpdater/hold-token"
+own_dir="$tmp/home/Library/Application Support/com.terranash.wirestudiokh"
+legacy_dir="$tmp/home/Library/KHUpdater"
+own_token="$own_dir/hold-token"
+legacy_token="$legacy_dir/hold-token"
+mkdir -p "$own_dir" "$legacy_dir"
+printf '%s' "$hold_token" > "$own_token"
+chmod 600 "$own_token"
 pid=""
 
 # The hold port is fixed, so refuse to run beside another copy: the calls would
@@ -192,11 +196,31 @@ run_full() {
 
   # The hold must refuse an unauthenticated caller with 401 and pause nothing (row 20261123-77):
   # Sparkle checks the feed only after the hold, so a green light here would skip it.
-  if [ -n "$hold_token" ]; then
-    pass "Launcher hold token file present"
+  # Wire's own token file, then the one-time move from the estate path, then neither (0.5.2).
+  code="$(curl -sS -m 5 -o "$tmp/own" -w '%{http_code}' -X POST "$full_hold_url" \
+    -H "x-hold-token: $hold_token" || true)"
+  if [ "$code" = "200" ]; then
+    pass "hold reads Wire's own token file"
   else
-    pass "Launcher hold token file absent — the hold must still refuse"
+    bad "hold reads Wire's own token file" "HTTP $code body=$(cat "$tmp/own" 2>/dev/null)"
   fi
+  rm -f "$own_token"; printf '%s' "$hold_token" > "$legacy_token"; chmod 600 "$legacy_token"
+  code="$(curl -sS -m 5 -o "$tmp/moved" -w '%{http_code}' -X POST "$full_hold_url" \
+    -H "x-hold-token: $hold_token" || true)"
+  if [ "$code" = "200" ] && [ -s "$own_token" ]; then
+    pass "the estate token is copied to Wire's own file once, and the copy answers"
+  else
+    bad "the estate token is copied to Wire's own file once, and the copy answers" \
+      "HTTP $code own=$( [ -s "$own_token" ] && echo present || echo absent)"
+  fi
+  rm -f "$own_token" "$legacy_token"
+  code="$(curl -sS -m 5 -o "$tmp/no-token" -w '%{http_code}' -X POST "$full_hold_url" || true)"
+  if [ "$code" = "401" ]; then
+    pass "with neither file the hold refuses 401 loudly"
+  else
+    bad "with neither file the hold refuses 401 loudly" "HTTP $code body=$(cat "$tmp/no-token" 2>/dev/null)"
+  fi
+  printf '%s' "$hold_token" > "$own_token"; chmod 600 "$own_token"
   code="$(curl -sS -m 5 -o "$tmp/no-token" -w '%{http_code}' -X POST "$full_hold_url" || true)"
   if [ "$code" = "401" ] && [ "$(json_field "$tmp/no-token" error)" = "hold refused: token" ]; then
     pass "hold without a token refused 401"

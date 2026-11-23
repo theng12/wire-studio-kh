@@ -6,6 +6,7 @@
 
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -54,12 +55,72 @@ fn header(request: &tiny_http::Request, name: &'static str) -> Option<String> {
         .map(|h| h.value.as_str().to_string())
 }
 
-/// The Launcher rotates this file; read it on every call, never cache it.
-fn launcher_token() -> Option<String> {
-    let home = std::env::var("HOME").ok()?;
-    let token = std::fs::read_to_string(Path::new(&home).join("Library/KHUpdater/hold-token")).ok()?;
-    let token = token.trim().to_string();
+/// Wire's own token file, beside the app's data. The estate path below is retired in 0.5.2.
+const BUNDLE_ID: &str = "com.terranash.wirestudiokh";
+
+fn token_path(home: &Path) -> std::path::PathBuf {
+    home.join("Library/Application Support").join(BUNDLE_ID).join("hold-token")
+}
+
+fn legacy_token_path(home: &Path) -> std::path::PathBuf {
+    home.join("Library/KHUpdater/hold-token")
+}
+
+fn read_token(path: &Path) -> Option<String> {
+    let token = std::fs::read_to_string(path).ok()?.trim().to_string();
     (!token.is_empty()).then_some(token)
+}
+
+/// Wire's own file first. The estate path is copied here once, said out loud, and never read again;
+/// when neither exists the answer is None and the route refuses with 401.
+fn launcher_token() -> Option<String> {
+    let home = std::path::PathBuf::from(std::env::var("HOME").ok()?);
+    let own = token_path(&home);
+    if let Some(token) = read_token(&own) {
+        return Some(token);
+    }
+    let legacy = legacy_token_path(&home);
+    let token = read_token(&legacy)?;
+    if let Some(dir) = own.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    std::fs::write(&own, format!("{token}\n")).ok()?;
+    let _ = std::fs::set_permissions(&own, std::fs::Permissions::from_mode(0o600));
+    eprintln!(
+        "hold token moved from {} to {}; that file is not read again",
+        legacy.display(),
+        own.display()
+    );
+    Some(token)
+}
+
+/// What the window says about the token, in the app's own words. Existence only for the estate path:
+/// its content is read solely by the one migration in `launcher_token`.
+pub fn token_status_json() -> serde_json::Value {
+    let home = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default());
+    let own = token_path(&home);
+    if read_token(&own).is_some() {
+        return json!({ "state": "ready", "path": own.display().to_string() });
+    }
+    if legacy_token_path(&home).is_file() {
+        return json!({
+            "state": "moves",
+            "path": own.display().to_string(),
+            "reason": format!(
+                "The Launcher's token at {} is copied to {} the first time an update is held.",
+                legacy_token_path(&home).display(),
+                own.display()
+            ),
+        });
+    }
+    json!({
+        "state": "missing",
+        "path": own.display().to_string(),
+        "reason": format!(
+            "No update-hold token at {}. Updates are refused until the Launcher writes one.",
+            own.display()
+        ),
+    })
 }
 
 /// Seconds from the query: 20 default / 30 ceiling for the settle, 120 default for the pause.

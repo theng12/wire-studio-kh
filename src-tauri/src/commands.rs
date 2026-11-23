@@ -97,6 +97,7 @@ pub fn state(s: State<'_, Shared>) -> Result<serde_json::Value, String> {
         },
         "gateway": crate::gateway::status_json(&s.data_dir),
         "media": crate::media::status_json(&s.data_dir),
+        "hold": crate::hold::token_status_json(),
         "appearance": cfg.appearance,
         "data_dir": s.data_dir.display().to_string(),
     }))

@@ -340,6 +340,11 @@
       presets,
       telegram,
       gateway,
+      hold: {
+        state: String((source.hold && source.hold.state) || ''),
+        path: String((source.hold && source.hold.path) || ''),
+        reason: String((source.hold && source.hold.reason) || '')
+      },
       media: {
         configured: Boolean(mediaRaw.configured),
         path: String(mediaRaw.path || ''),
@@ -799,6 +804,18 @@
       button.classList.toggle('is-active', button.dataset.themeChoice === storageGet('wire.appearance', 'system'));
     });
     renderGatewayCard();
+    renderHoldCard();
+  }
+
+  // The update hold's token, in the app's own words: ready, moving on the first hold, or missing.
+  function renderHoldCard() {
+    const hold = state.hold || {};
+    const chip = $('#holdChip');
+    const words = { ready: 'ready', moves: 'moves on first hold', missing: 'token missing' };
+    chip.textContent = words[hold.state] || 'not checked';
+    chip.dataset.level = hold.state === 'ready' ? 'ok' : hold.state === 'missing' ? 'bad' : 'warn';
+    $('#holdReason').textContent = hold.reason ||
+      (hold.state === 'ready' ? `Update token at ${hold.path}.` : 'Wire pauses its queue before every update check. This says whether it can.');
   }
 
   // Gateway is the model source: the chip never says connected until Gateway answered a read.

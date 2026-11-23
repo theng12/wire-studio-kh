@@ -92,7 +92,7 @@ assert p.get("SUFeedURL") == "https://theng12.github.io/wire-studio-kh/appcast.x
 key = p.get("SUPublicEDKey") or ""
 assert len(key) == 44, "SUPublicEDKey missing or wrong"
 assert p.get("KHHoldURL", "").endswith(":8649/api/maintenance/hold"), "KHHoldURL missing"
-assert p.get("KHHoldTokenFile", "").endswith("KHUpdater/hold-token"), "KHHoldTokenFile missing"
+assert p.get("KHHoldTokenFile", "").endswith("com.terranash.wirestudiokh/hold-token"), "KHHoldTokenFile missing"
 print("Info.plist: id, version, SUFeedURL, SUPublicEDKey, KHHoldURL, KHHoldTokenFile ok")
 PY
 otool -l "$app/Contents/MacOS/$name" | grep -q '@executable_path/../Frameworks' \

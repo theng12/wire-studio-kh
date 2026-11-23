@@ -12,6 +12,6 @@
   <key>KHHoldURL</key>
   <string>http://127.0.0.1:8649/api/maintenance/hold</string>
   <key>KHHoldTokenFile</key>
-  <string>~/Library/KHUpdater/hold-token</string>
+  <string>~/Library/Application Support/com.terranash.wirestudiokh/hold-token</string>
 </dict>
 </plist>

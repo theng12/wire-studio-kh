@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.2 — 2026-11-23
+
+- **Wire can update itself now.** The Sparkle helper in 0.5.1 could not read a `~/…` token path, so every update was refused before the check ran. 0.5.2 carries the fixed helper, and Settings says which state the update token is in.
+- **The update token lives with Wire's own data.** It moves to `~/Library/Application Support/com.terranash.wirestudiokh/hold-token`. The old shared location is copied there once, with a line saying so, and is never read again.
+- **No token means the hold refuses and says why** — in the app's own words, naming the file it looked for — instead of waiting for an update to fail.
+
 ## 0.5.1 — 2026-11-23
 
 - **Wire updates itself.** The app now carries Sparkle, the studio's one update mechanism: it checks the signed appcast, downloads a newer version and swaps it in while the app is relaunched. There is no window, no prompt and nothing to click — the same behaviour as the other KH apps.
