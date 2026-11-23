@@ -1,0 +1,8 @@
+{
+  "name": "Wire Studio KH",
+  "bundle_id": "com.terranash.wirestudiokh",
+  "type": "media",
+  "tagline": "Posts one caption to your social accounts.",
+  "description": "Composes one caption and sends it to your social accounts, each named by you rather than a technical key, with a Gateway connection you can check at any time.",
+  "localFile": "Wire Studio KH_0.5.1_aarch64.dmg"
+}

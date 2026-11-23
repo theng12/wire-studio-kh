@@ -31,6 +31,9 @@ step "Checking versions agree"
 grep -qx "version = \"$version\"" src-tauri/Cargo.toml || fail "Cargo.toml version differs from VERSION"
 grep -q "\"version\": \"$version\"" src-tauri/tauri.conf.json || fail "tauri.conf.json version differs from VERSION"
 [ "$(awk '/^## / { print $2; exit }' CHANGELOG.md)" = "$version" ] || fail "CHANGELOG.md's newest entry is not $version"
+# app-meta.json is read by the feed generator at the tag; a stale localFile names the wrong artifact.
+grep -q "\"localFile\": \"${name}_${version}_aarch64.dmg\"" app-meta.json \
+  || fail "app-meta.json localFile does not name ${name}_${version}_aarch64.dmg"
 
 step "Reading this app's Sparkle public key"
 # The public half lives beside the private one and is not secret; it is still not committed, because
