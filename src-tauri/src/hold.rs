@@ -7,7 +7,7 @@
 use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{Duration, Instant};

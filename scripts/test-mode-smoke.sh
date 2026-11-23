@@ -3,6 +3,7 @@
 set -u
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 bin="${WIRE_BIN:-$root/src-tauri/target/debug/wire-studio-kh}"
 [ -x "$bin" ] || bin="$root/src-tauri/target/release/wire-studio-kh"
 

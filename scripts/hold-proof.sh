@@ -4,6 +4,7 @@
 set -u
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 bin="${WIRE_BIN:-$root/src-tauri/target/debug/wire-studio-kh}"
 [ -x "$bin" ] || bin="$root/src-tauri/target/release/wire-studio-kh"
 
@@ -86,8 +87,13 @@ url="http://127.0.0.1:$port"
 hold_base="http://127.0.0.1:8649/api/maintenance/hold"
 full_hold_url="$hold_base?timeout_s=20&pause_s=30"
 expiry_hold_url="$hold_base?timeout_s=20&pause_s=2"
-hold_token=""
-[ -f "$HOME/Library/KHUpdater/hold-token" ] && hold_token="$(tr -d '[:space:]' < "$HOME/Library/KHUpdater/hold-token")"
+# The app reads the Launcher token from $HOME/Library/KHUpdater/hold-token, and a missing file is now
+# a refusal (row 20261123-77). The proof owns a temp HOME with a token so it tests the real contract
+# without depending on whether this Mac's Launcher has written one.
+hold_token="wire-hold-proof-$$"
+mkdir -p "$tmp/home/Library/KHUpdater"
+printf '%s' "$hold_token" > "$tmp/home/Library/KHUpdater/hold-token"
+chmod 600 "$tmp/home/Library/KHUpdater/hold-token"
 pid=""
 
 # The hold port is fixed, so refuse to run beside another copy: the calls would
@@ -120,7 +126,7 @@ launch() {
     while [ ! -f "$2" ]; do sleep 0.05; done
     shift 2
     exec "$@"
-  ' _ "$tmp/pidfile" "$tmp/go" env TMPDIR="$tmp" WIRE_STUDIO_KH_DATA_DIR="$data" \
+  ' _ "$tmp/pidfile" "$tmp/go" env TMPDIR="$tmp" HOME="$tmp/home" WIRE_STUDIO_KH_DATA_DIR="$data" \
       WIRE_OPERATOR_TOKEN="$token" KH_TEST_PORT="$port" "$bin" --test-mode --KH_TEST_PORT "$port" \
       >"$log" 2>&1 &
   local tries

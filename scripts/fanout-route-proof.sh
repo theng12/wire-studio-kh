@@ -5,6 +5,7 @@
 # Usage: fanout-route-proof.sh
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
 BIN="${WIRE_BIN:-$ROOT/src-tauri/target/debug/wire-studio-kh}"
 [ -x "$BIN" ] || { echo "FAIL binary missing: $BIN"; exit 1; }
 

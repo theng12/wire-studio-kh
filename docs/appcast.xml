@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+  <channel>
+    <title>Wire Studio KH</title>
+    <link>https://theng12.github.io/wire-studio-kh/appcast.xml</link>
+    <description>Wire Studio KH releases</description>
+    <language>en</language>
+  <item><title>0.5.1</title><pubDate>Mon, 23 Nov 2026 13:02:54 +0000</pubDate><sparkle:version>0.5.1</sparkle:version><sparkle:shortVersionString>0.5.1</sparkle:shortVersionString><sparkle:minimumSystemVersion>10.13</sparkle:minimumSystemVersion><enclosure url="https://github.com/theng12/wire-studio-kh/releases/download/wire-0.5.1/Wire.Studio.KH_0.5.1_aarch64.dmg" length="6116165" type="application/octet-stream" sparkle:version="0.5.1" sparkle:shortVersionString="0.5.1" sparkle:edSignature="Z4GjxRYhrP49lT7D2hoX5xtAEadJL9/pDvNkRMI+MUynUEHdeTAxaEzAHtRVXDCDmARNh2AoleOeZm0tc42lAw==" /></item></channel>
+</rss>
