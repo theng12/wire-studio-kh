@@ -79,9 +79,9 @@ codesign --force --sign "$ID" --timestamp=none --options runtime "$FW" \
   || fail "could not sign the Sparkle framework version"
 codesign --force --sign "$ID" --timestamp=none --options runtime "$app/Contents/Frameworks/Sparkle.framework" \
   || fail "could not sign the framework bundle"
-codesign --force --sign "$ID" --timestamp=none --options runtime "$app/Contents/MacOS/$name" \
+codesign --force --sign "$ID" --timestamp=none --options runtime --entitlements src-tauri/entitlements.plist "$app/Contents/MacOS/$name" \
   || fail "could not sign the binary"
-codesign --force --sign "$ID" --timestamp=none --options runtime "$app" \
+codesign --force --sign "$ID" --timestamp=none --options runtime --entitlements src-tauri/entitlements.plist "$app" \
   || fail "could not sign the app"
 codesign --verify --deep --strict "$app" || fail "the app's signature is broken"
 
@@ -100,7 +100,7 @@ for _ in $(seq 1 40); do
   sleep 0.1
 done
 kill -TERM "$probe_pid" 2>/dev/null; wait "$probe_pid" 2>/dev/null
-[ "$ready" = 1 ] || { tail -3 "$probe_data/probe.log" >&2; rm -rf "$probe_data"; fail "the packaged binary does not start (dyld or signature)"; }
+[ "$ready" = 1 ] || { cat "$probe_data/probe.log" >&2; rm -rf "$probe_data"; fail "the packaged binary does not start (dyld or signature)"; }
 rm -rf "$probe_data"
 echo "the packaged binary starts and answers in test mode"
 
