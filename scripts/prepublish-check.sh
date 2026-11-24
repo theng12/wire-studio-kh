@@ -80,3 +80,18 @@ print(f"tagline   {tag!r} ({len(tag)} chars)")
 print(f"serving   {row.get('version')} sha {(row.get('sha256') or '')[:16]}")
 PY
 echo "PASS prepublish check for $version"
+
+# 4. §5d: the release is not done without the screenshots, so they are a finding, not a note.
+shot_dir=docs/screenshots
+count=0
+if [ -d "$shot_dir" ]; then
+  for png in "$shot_dir"/*.png; do
+    [ -e "$png" ] || continue
+    size=$(stat -f %z "$png")
+    [ "$size" -le 409600 ] || fail "$(basename "$png") is $size bytes, over the 400 KB rule"
+    grep -q "$(basename "$png")" README.md || fail "$(basename "$png") is not referenced from README.md"
+    count=$((count + 1))
+  done
+fi
+[ "$count" -ge 3 ] || fail "docs/screenshots holds $count image(s); three is the floor"
+echo "screenshots $count images, each <=400 KB and referenced from README.md"

@@ -52,6 +52,7 @@
   let connected = false;
   let coreError = null;
   let activeSection = 'composer';
+  let startSectionApplied = false;
   let queueLayout = 'table';
   let dialogSeq = 0;
   const dialogStack = [];
@@ -340,6 +341,7 @@
       presets,
       telegram,
       gateway,
+      startSection: String(source.start_section || ''),
       hold: {
         state: String((source.hold && source.hold.state) || ''),
         path: String((source.hold && source.hold.path) || ''),
@@ -491,6 +493,12 @@
     $('#queueBtn').disabled = !connected || state.targets.length === 0;
     $('#queueBtn').title = !connected ? 'Wire is not answering — nothing can be queued.' : '';
     updateCount();
+    // Capture only: WIRE_START_SECTION names the section to open first, so the screenshots in
+    // docs/screenshots come from the shipped build without a pointer or a keystroke.
+    if (!startSectionApplied && state.startSection && $('.nav-item[data-section="' + state.startSection + '"]')) {
+      startSectionApplied = true;
+      showSection(state.startSection);
+    }
   }
 
   function renderTargetChecks() {

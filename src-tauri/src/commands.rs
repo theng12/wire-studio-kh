@@ -96,6 +96,9 @@ pub fn state(s: State<'_, Shared>) -> Result<serde_json::Value, String> {
             "reason": reason,
         },
         "gateway": crate::gateway::status_json(&s.data_dir),
+        // Capture only: WIRE_START_SECTION opens a named section first, so docs/screenshots can be
+        // taken from the shipped build without driving the pointer.
+        "start_section": std::env::var("WIRE_START_SECTION").unwrap_or_default(),
         "media": crate::media::status_json(&s.data_dir),
         "hold": crate::hold::token_status_json(),
         "appearance": cfg.appearance,
