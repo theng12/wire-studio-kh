@@ -90,6 +90,18 @@ folder at `/tmp/wire-studio-kh-demo`, deleted after each run.
 - Nothing about posting changed.
 - Release notes are the two-sentence summary in `lead/0.5.3/RELEASE-NOTES.md`, not the changelog.
 
+## Known provenance gap — amended 2026-11-24, after closeout
+
+The asset is stored as `Wire.Studio.KH_0.5.3_aarch64.dmg`, with no `<sha12>-` prefix; the convention is
+`<sha12>-<name>` (Relay 0.3.39 ships `d4b4d07cbe90-Relay.Studio.KH_0.3.39_aarch64.dmg`). What is lost is
+provenance at a glance — a reader cannot match the file name to the artifact without downloading and
+hashing it. The bytes are not in question: the served row, the appcast and a full anonymous download all
+hash to `90b8f578…bb319`. Not renamed, deliberately: the row, the appcast and the feed all name the current
+file, and renaming a published asset breaks the chain it was meant to prove. Fix forward — the next Wire
+release cuts its asset through `packaging/github-asset.sh`; check with
+`_orchestra/tools/release-asset-name-check.sh theng12/wire-studio-kh v0.5.3` (takes the tag, not the
+version). Found by that check, not by a failure.
+
 ## Not proven
 
 - Updated by itself — no installed copy has changed its version by itself; the Mac runs 0.5.0.
