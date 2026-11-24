@@ -2,7 +2,7 @@
 
 ## 0.5.3 — 2026-11-24
 
-- The README now shows Wire: the queue you land on, the composer with a product chosen, and the two Settings cards that carry a real choice — Gateway and Updates.
+- The README now shows Wire: the queue you land on, the composer where a post starts, and the two Settings cards that carry a real choice — Gateway and Updates.
 - Nothing about posting changed in this release; its job is to carry those pictures and the release-notes rule for the Launcher card.
 
 ## 0.5.2 — 2026-11-23
