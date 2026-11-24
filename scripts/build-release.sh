@@ -73,13 +73,36 @@ for nested in "$FW/XPCServices/Downloader.xpc" "$FW/XPCServices/Installer.xpc" "
   codesign --force --sign "$ID" --timestamp=none --options runtime "$nested" \
     || fail "could not sign $(basename "$nested")"
 done
+codesign --force --sign "$ID" --timestamp=none --options runtime "$FW/Sparkle" \
+  || fail "could not sign Sparkle's framework binary"
 codesign --force --sign "$ID" --timestamp=none --options runtime "$FW" \
-  || fail "could not sign the Sparkle framework"
+  || fail "could not sign the Sparkle framework version"
+codesign --force --sign "$ID" --timestamp=none --options runtime "$app/Contents/Frameworks/Sparkle.framework" \
+  || fail "could not sign the framework bundle"
 codesign --force --sign "$ID" --timestamp=none --options runtime "$app/Contents/MacOS/$name" \
   || fail "could not sign the binary"
 codesign --force --sign "$ID" --timestamp=none --options runtime "$app" \
   || fail "could not sign the app"
 codesign --verify --deep --strict "$app" || fail "the app's signature is broken"
+
+# dyld loads Sparkle before main, so a packaged binary started in test mode is a headless launch
+# probe: a signature pairing dyld refuses kills it here, not on a Mac that installed the DMG.
+step "Proving the packaged binary survives dyld"
+probe_port="$(python3 -I -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')"
+probe_data="$(mktemp -d "${TMPDIR:-/tmp}/wire-launch-probe.XXXXXX")"
+WIRE_STUDIO_KH_DATA_DIR="$probe_data" "$app/Contents/MacOS/$name" --test-mode --KH_TEST_PORT "$probe_port" \
+  >"$probe_data/probe.log" 2>&1 &
+probe_pid=$!
+ready=0
+for _ in $(seq 1 40); do
+  if curl -fsS -m 1 "http://127.0.0.1:$probe_port/api/test/state" >/dev/null 2>&1; then ready=1; break; fi
+  kill -0 "$probe_pid" 2>/dev/null || break
+  sleep 0.1
+done
+kill -TERM "$probe_pid" 2>/dev/null; wait "$probe_pid" 2>/dev/null
+[ "$ready" = 1 ] || { tail -3 "$probe_data/probe.log" >&2; rm -rf "$probe_data"; fail "the packaged binary does not start (dyld or signature)"; }
+rm -rf "$probe_data"
+echo "the packaged binary starts and answers in test mode"
 
 step "Checking what the bundle carries"
 python3 - "$app" "$version" <<'PY'
