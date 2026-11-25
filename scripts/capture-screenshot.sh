@@ -12,7 +12,7 @@ cd "$(dirname "$0")/.."
 SECTION="${1:?section, e.g. queue}"
 NAME="${2:?outfile, e.g. queue-dark.png}"
 MODE="${3:-hidden}"
-APP="src-tauri/target/release/bundle/macos/Wire Studio KH.app"
+APP="$PWD/src-tauri/target/release/bundle/macos/Wire Studio KH.app"
 BIN="$APP/Contents/MacOS/Wire Studio KH"
 [ -x "$BIN" ] || { echo "FAIL no release build at $APP — run scripts/build-release.sh first"; exit 1; }
 OUT=docs/screenshots
@@ -67,7 +67,8 @@ open "${FLAGS[@]}" --env WIRE_STUDIO_KH_DATA_DIR="$DATA" --env WIRE_START_SECTIO
 
 PID=""
 for _ in $(seq 1 80); do
-  PID="$(pgrep -f "Contents/MacOS/Wire Studio KH" | head -1)"
+  # Anchored: an unanchored pattern matches the owner's /Applications copy and captures that window.
+  PID="$(pgrep -f "^$BIN" | head -1)"
   [ -n "$PID" ] && break
   sleep 0.25
 done

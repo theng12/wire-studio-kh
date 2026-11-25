@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.4 — 2026-11-25
+
+- **The sidebar stays in the window.** Support this app, the version pill and What's New now sit at the bottom of the sidebar at every window size and on every page; only the page content scrolls, never the whole window.
+- **Two Settings cards both said "Updates".** They are different things — whether Wire may pause its queue for an update, and the update check itself — so the first one is now called **Update hold**.
+
 ## 0.5.3 — 2026-11-24
 
 - The README now shows Wire: the queue you land on, the composer where a post starts, and the two Settings cards that carry a real choice — Gateway and Updates.
@@ -64,13 +69,3 @@
 - The Telegram card stops contradicting itself: it now says **connected** only after Telegram itself confirms the bot and the channel, **saved, not verified** when both are stored but unconfirmed, and shows Telegram's own refusal word for word when the check fails.
 - Saving a token and channel now asks Telegram straight away: who the bot is, and whether it can see that channel. A network miss never loses what you saved — it says "saved, not verified" and why.
 - The version shown in the footer, About and Settings now comes from the app build itself, not a hand-written string, so the footer always names the version you are actually running.
-
-## 0.3.0 — 2026-11-21
-
-- Two more places to post: a YouTube channel (the video uploads straight to the channel and picks up where it stopped if the connection drops) and a Facebook Page (a text post, or one image that lives at a public web address).
-- Format presets: each place now has named sizes to choose from — YouTube landscape and Shorts, Facebook square, portrait and link card, Telegram text — and the composer shows the size, ratio, text limit and safe area before anything is sent.
-- One post, many places and many sizes: every place-plus-size pair is its own line in the queue, so you can see each one separately and a double post is still impossible.
-- Instagram is designed and shelved: nothing is built and it never appears in the app.
-- Refusals stay honest: a Facebook size on a YouTube channel is refused by name, Facebook says plainly when an image has no public web address, and sign-in or permission problems go to Needs attention instead of retrying forever.
-- The adapter tests now cover success, throttling, cut text, permanent refusal and sign-in expiry for every platform, so retry behaviour is proven before a real account is connected.
-
