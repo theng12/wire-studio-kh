@@ -9,7 +9,7 @@ bytes: 6120843
 scan: sha256=90b8f5784538dbbbeef684a0fd1ff9af868d83ba1406d22e558b5da31b3bb319 clean — scan-dmg/2026-11-20, exit 0, 89 files, excused: none
 gate config: $HOME/Developer/_orchestra/tools/gate-configs/wire-0.5.3.sh (MINUTES=20)
 gate exit: 0 — "GATE PASS wire 4f4c840e996ece847fd6a21c9e0d23dc04e1e8c4 2026-11-24T09:13:55Z"
-gate runner, pasted from the run's own summary.txt:
+gate runner, pasted from the run's own summary.txt (home path rewritten to $HOME on 2026-11-25, issue 20261125-2):
     runner: gate-run.sh f05b010c16e5 at $HOME/Developer/_orchestra/tools/gate-run.sh
     the file at that path hashed f05b010c16e577986c796341a43b41b450e4639b82159f664c15b7b89d06bd5a at the end, unchanged; a rename would not have corrupted this run, an in-place rewrite would have (Release Tooling measured both)
 feed readback: wire 0.5.3 — fresh anonymous read of https://theng12.github.io/kh-releases/release.json: version 0.5.3, sha256 90b8f5784538dbbbeef684a0fd1ff9af868d83ba1406d22e558b5da31b3bb319, 6,120,843 bytes, tagline "Posts one caption to your social accounts.", holdURL http://127.0.0.1:8649/api/maintenance/hold, holdSince 0.1.0, url .../releases/download/v0.5.3/Wire.Studio.KH_0.5.3_aarch64.dmg
