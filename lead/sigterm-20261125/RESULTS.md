@@ -40,21 +40,26 @@ Immediately before signalling, the queue row and hold said:
 [inflight-sigterm] Shutdown ended the in-flight job: state=pending outcome='sendMessage: error sending request for url (https://api.telegram.org/bot[redacted]/sendMessage)'
 ```
 
-The 3.584 s exit is the shutdown path waiting for the in-flight request; the idle held run exits in
-0.119 s. The app logged:
+The 3.557 s exit is the shutdown path waiting for the in-flight request; the idle held run exits in
+0.125 s. The app logged:
 
 ```text
 shutdown: signal=SIGTERM held=true settled=true in_flight=0 unsettled=[] wal_checkpoint=ok
 ```
 
-The job did not stay `sending`: it ended `pending`, attempts 1, with the adapter's named transport
-error. `PRAGMA quick_check` was `ok`, no hold file persisted, no process survived, port 8649 was free
-and the foreground application did not change.
+The job did not stay `sending`: it ended `pending`, attempts 1. `PRAGMA quick_check` was `ok`, no hold
+file persisted, no process survived, port 8649 was free and the foreground application did not change.
+
+**Delivery unknown for that job.** The row is kept with a named transport error and a timestamp the
+next start can follow. A transport failure may happen before or after Telegram accepted the request,
+and the app cannot tell which. In this harness the local proxy never forwarded the `CONNECT` to
+Telegram, but that is a harness fact, not something the app or its log can prove. Whether that one
+message was delivered is unproven; the row correctly records an error, not a delivery claim.
 
 ## Restart
 
 - Clean restart after the settled job: startup log contains no `queue startup: released` line, hold
-  was safe with `in_flight=0`, exit 0 in 0.112 s. Nothing stale was found.
+  was safe with `in_flight=0`, exit 0 in 0.130 s. Nothing stale was found.
 - Deliberately simulated stale `sending` row: restart logged
   `queue startup: released 1 interrupted sending delivery(ies) back to pending`, the row returned to
   `pending` attempts 1 claimed_at NULL, `quick_check=ok`.
@@ -64,11 +69,14 @@ and the foreground application did not change.
 Proved: the packaged, signed app's real dispatch/adapter path can be in flight when SIGTERM lands;
 the shutdown path waits for it (bounded by the 8 s settle ceiling), records a settled outcome, leaves
 no `sending` row and no persisted hold, and the next start finds nothing stale after a clean settle.
+The job was not silently lost and the row is reclaimable; **whether that one message was delivered
+is unproven**.
 
 Not proved here:
 
-- A successful Telegram publish during shutdown. The local proxy returned 502, so the named outcome
-  is a transport failure. This exercises the real adapter and dispatch code, not Telegram itself.
+- A successful Telegram publish during shutdown — delivery unknown for that job. The local proxy
+  returned 502, so the app recorded a transport failure. This exercises the real adapter and dispatch
+  code, not Telegram itself.
 - Installation, DMG, feed, appcast, Sparkle update or public release. This is a local signed proof
   build only; 0.5.4 remains published and unchanged.
 - A job that cannot settle inside the 8 s ceiling. The separate bounded-unsettled unit test covers
