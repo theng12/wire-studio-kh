@@ -1,0 +1,3 @@
+[khsparkle] refused: hold token file missing or unreadable: $HOME/Library/Application Support/com.terranash.wirestudiokh/hold-token
+update hold: settled in_flight=0 pause_s=25
+shutdown: signal=SIGTERM held=true settled=true in_flight=0 unsettled=[] wal_checkpoint=ok elapsed_ms=0

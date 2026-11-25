@@ -1,0 +1,23 @@
+PASS seed: packaged .app 0.5.4 (copied from $HOME/Developer/_orchestra/developer-media/wire-studio-kh/worktrees/sigterm-20261125/src-tauri/target/release/bundle/macos/Wire Studio KH.app); headless --test-mode SIGTERM exit=0; delivery=c05ca308-7636-4acb-a953-7d6db6bda503
+[held-sigterm] Update hold before SIGTERM: {"dispatch_paused_s": 25, "in_flight": 0, "safe": true, "unsettled": []}
+[held-sigterm] Desktop safety before SIGTERM: PID=52376; visible normal windows=0; foreground unchanged=True; descendants=[]
+[held-sigterm] SIGTERM: exit_code=0; all_gone=True in 0.125s; survivors=[]; hold_port_free=True; foreground_unchanged=True
+[held-sigterm] Data files changed during SIGTERM: ['wire.db-shm']; no persisted hold file=True
+[held-sigterm] Queue read-only: quick_check=ok; row=('pending', 0, None)
+[inflight-sigterm] Job in flight at signal time: state=sending attempts=1 proxy_connects=1
+[inflight-sigterm] Update hold while job is in flight: {"dispatch_paused_s": 25, "in_flight": 1, "safe": false, "unsettled": ["c05ca308-7636-4acb-a953-7d6db6bda503"]}
+[inflight-sigterm] Desktop safety before SIGTERM: PID=52524; visible normal windows=0; foreground unchanged=True; descendants=[]
+[inflight-sigterm] SIGTERM: exit_code=0; all_gone=True in 3.557s; survivors=[]; hold_port_free=True; foreground_unchanged=True; no_persisted_hold_file=True; job_after=('pending', 1, '2026-11-25T14:33:07Z', 'sendMessage: error sending request for url (https://api.telegram.org/bot[redacted]/sendMessage)')
+[inflight-sigterm] Shutdown ended the in-flight job: state=pending outcome='sendMessage: error sending request for url (https://api.telegram.org/bot[redacted]/sendMessage)'
+[inflight-sigterm] Queue read-only: quick_check=ok
+[clean-restart] Update hold before SIGTERM: {"dispatch_paused_s": 25, "in_flight": 0, "safe": true, "unsettled": []}
+[clean-restart] Desktop safety before SIGTERM: PID=52772; visible normal windows=0; foreground unchanged=True; descendants=[]
+[clean-restart] SIGTERM: exit_code=0; all_gone=True in 0.130s; survivors=[]; hold_port_free=True; foreground_unchanged=True
+[clean-restart] Data files changed during SIGTERM: ['wire.db', 'wire.db-shm']; no persisted hold file=True
+[startup-reclaim] Update hold before SIGTERM: {"dispatch_paused_s": 25, "in_flight": 0, "safe": true, "unsettled": []}
+[startup-reclaim] Desktop safety before SIGTERM: PID=53211; visible normal windows=0; foreground unchanged=True; descendants=[]
+[startup-reclaim] SIGTERM: exit_code=0; all_gone=True in 0.132s; survivors=[]; hold_port_free=True; foreground_unchanged=True
+[startup-reclaim] Data files changed during SIGTERM: ['wire.db', 'wire.db-shm']; no persisted hold file=True
+[startup-reclaim] Queue read-only: quick_check=ok; row=('pending', 1, None)
+PASS all hidden SIGTERM checks (packaged .app 0.5.4 (copied from $HOME/Developer/_orchestra/developer-media/wire-studio-kh/worktrees/sigterm-20261125/src-tauri/target/release/bundle/macos/Wire Studio KH.app))
+Evidence kept at /private/var/folders/qp/64pbc0jn23x2ytbmpzp0rxgm0000gn/T/wire-sigterm-proof-yfny3ob_

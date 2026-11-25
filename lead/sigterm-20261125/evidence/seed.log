@@ -1,0 +1,4 @@
+TEST_URL=http://127.0.0.1:56439
+TEST_TOKEN=2a88eba342f741562cc595365db970f81fb5f423be15abb8
+TEST_DATA_DIR=/private/var/folders/qp/64pbc0jn23x2ytbmpzp0rxgm0000gn/T/wire-sigterm-proof-yfny3ob_/data
+shutdown: signal=SIGTERM held=false settled=true in_flight=0 unsettled=[] wal_checkpoint=ok elapsed_ms=17
