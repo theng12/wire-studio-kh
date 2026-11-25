@@ -24,6 +24,9 @@ pub fn spawn(state: Shared) {
             .build()
             .expect("dispatch runtime");
         loop {
+            if state.shutting_down.load(Ordering::SeqCst) {
+                break;
+            }
             if state.paused.load(Ordering::Relaxed) {
                 // The pause is in-memory and expires by itself, even when no
                 // request ever arrives to refresh it (an install that dies).
@@ -46,6 +49,10 @@ pub fn spawn(state: Shared) {
                     }
                     continue;
                 }
+            }
+
+            if state.shutting_down.load(Ordering::SeqCst) {
+                break;
             }
 
             let claimed = {
@@ -86,7 +93,9 @@ pub fn spawn(state: Shared) {
                 continue;
             };
 
-            let (failure, reason) = match publish(&state, &rt, &claim) {
+            state.in_flight.fetch_add(1, Ordering::SeqCst);
+            let outcome = publish(&state, &rt, &claim);
+            match outcome {
                 Ok((remote_id, remote_url)) => {
                     let mut store = state.store.lock().expect("store");
                     if let Err(e) = store.mark_sent(
@@ -96,15 +105,16 @@ pub fn spawn(state: Shared) {
                     ) {
                         eprintln!("queue settle failed: {e}");
                     }
-                    continue;
                 }
-                Err(err) => (err.classify(), err.message.clone()),
-            };
-
-            let mut store = state.store.lock().expect("store");
-            if let Err(e) = store.mark_failed(&claim.delivery_id, failure, &reason) {
-                eprintln!("queue failure settle failed: {e}");
+                Err(err) => {
+                    let mut store = state.store.lock().expect("store");
+                    if let Err(e) = store.mark_failed(&claim.delivery_id, err.classify(), &err.message) {
+                        eprintln!("queue failure settle failed: {e}");
+                    }
+                }
             }
+            state.in_flight.fetch_sub(1, Ordering::SeqCst);
+            state.wake();
         }
     });
 }

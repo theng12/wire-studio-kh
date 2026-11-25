@@ -200,7 +200,7 @@ pub(crate) fn in_flight(state: &AppState) -> usize {
 }
 
 /// Ids of the rows actually sending, taken from the queue rather than guessed from the counter.
-fn sending_ids(state: &AppState) -> Vec<String> {
+pub(crate) fn sending_ids(state: &AppState) -> Vec<String> {
     let view = {
         let store = guard(&state.store);
         serde_json::to_value(store.queue_view().unwrap_or_default()).unwrap_or(Value::Null)

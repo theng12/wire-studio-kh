@@ -22,14 +22,10 @@ fn main() {
         let state = wire_studio_kh::init_state(&dir).expect("test state");
         let p = port.unwrap_or(18765);
 
-        // SIGTERM ends the run cleanly, so a harness sees exit 0 and the port free.
-        extern "C" fn on_term(_sig: libc::c_int) {
+        // SIGTERM/SIGINT settle in-flight work, checkpoint WAL, log the outcome, and exit 0.
+        wire_studio_kh::shutdown::install(state.clone(), || {
             std::process::exit(0);
-        }
-        unsafe {
-            libc::signal(libc::SIGTERM, on_term as *const () as libc::sighandler_t);
-            libc::signal(libc::SIGINT, on_term as *const () as libc::sighandler_t);
-        }
+        });
 
         wire_studio_kh::start_hold(state.clone(), 8649);
         wire_studio_kh::dispatch::spawn(state.clone());

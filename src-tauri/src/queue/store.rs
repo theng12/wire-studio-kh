@@ -524,6 +524,13 @@ impl Store {
         )?;
         Ok(n as usize)
     }
+
+    /// Flush completed WAL frames back to the main database file without blocking readers.
+    pub fn checkpoint(&self) -> rusqlite::Result<(i64, i64, i64)> {
+        self.conn.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })
+    }
 }
 
 #[cfg(test)]
