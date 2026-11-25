@@ -156,7 +156,9 @@ button { cursor: pointer; }
 .footer-status[data-level="ok"] { color: var(--ok); }
 
 /* Pages */
-.page { flex: 1; min-width: 0; max-width: 1120px; padding: var(--sp-6); overflow: auto; }
+/* position: relative contains the page's absolutely positioned labels (the clipped visually-hidden
+   ones), which otherwise resolve against the body and scroll the whole window. */
+.page { flex: 1; min-width: 0; max-width: 1120px; padding: var(--sp-6); overflow: auto; position: relative; }
 .page-header { margin-bottom: var(--sp-5); }
 .eyebrow { margin: 0 0 var(--sp-1); font-size: 11px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--accent-text); }
 .page-header h1 { margin: 0 0 var(--sp-1); font-size: 26px; font-weight: 600; letter-spacing: -.015em; }
